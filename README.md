@@ -1,5 +1,21 @@
 # RISCV Sail Model
 
+> **Fork notice** — This repository is a fork of
+> [CHERI-Alliance/sail-riscv](https://github.com/CHERI-Alliance/sail-riscv),
+> maintained for the **TruISA** project.
+>
+> Baseline pinned at `80a9e6514a87dd5031324ddfca31730ca739ceaf`
+> (upstream branch `cheri-0.9.3`, commit subject *Fix builds of tests on some platforms. (#1444)*).
+>
+> | Ref | Purpose |
+> |---|---|
+> | `cheri-0.9.3` | **read-only** baseline, never committed to |
+> | `upstream-80a9e65` | tag on the same commit, immutable anchor |
+> | `truisa` | development branch |
+>
+> Do **not** develop on `cheri-0.9.3`. See [BASELINE.md](BASELINE.md) and
+> ADR-0025 in the TruISA architecture repository.
+
 This repository contains a formal specification of the RISC-V architecture, written in
 [Sail](https://github.com/rems-project/sail). It has been adopted by RISC-V International.
 
