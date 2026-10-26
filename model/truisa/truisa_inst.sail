@@ -13,7 +13,6 @@
 union clause instruction = GCBASE : (regidx, regidx)
 union clause instruction = GCBOUND: (regidx, regidx)
 union clause instruction = GCADDR : (regidx, regidx)
-union clause instruction = CSUB   : (regidx, regidx, regidx)
 
 /*!
  * insnref: gcbase_32bit
@@ -65,22 +64,6 @@ function clause execute (GCBOUND(rd, rs1)) = {
  */
 function clause execute (GCADDR(rd, rs1)) = {
   X(rd) = sign_extend(X(rs1)[47 .. 0]);
-  RETIRE_SUCCESS
-}
-
-/*!
- * insnref: csub_32bit
- * Pointer address subtraction
- *
- * csub rd, rs1, rs2
- *
- * rd is set to addr(rs1) - addr(rs2), modulo 2^XLEN.
- * Ported from CHERIoT's CSub (cheriot-sail src/cheri_insts.sail:472), with
- * C(x).address replaced by sign_extend(X(x)[47..0]) -- TruISA keeps pointers
- * in the integer register file.
- */
-function clause execute (CSUB(rd, rs1, rs2)) = {
-  X(rd) = sign_extend(X(rs1)[47 .. 0]) - sign_extend(X(rs2)[47 .. 0]);
   RETIRE_SUCCESS
 }
 
@@ -255,60 +238,21 @@ function clause execute (SCEQ(rd, cs1, cs2)) = {
   RETIRE_SUCCESS
 }
 
-enum CapAccessType = { Cap_Read, Cap_Write, Cap_ReadWrite }
-
-function cap_mem_access_exception(auth_val : Capability, Virtaddr(vaddr) : virtaddr, acc_type : CapAccessType) -> option(CapEx) = {
-  assert(xlen >= 32);
-  assert(cap_size <= cap_max_len);
-  if not(capTaggedAndReservedValid(auth_val)) then {
-    Some(CapEx_TagViolation)
-  } else if capIsSealed(auth_val) then {
-    Some(CapEx_SealViolation)
-  } else if not((match acc_type {
-    Cap_Read => canR(auth_val),
-    Cap_Write => canW(auth_val),
-    Cap_ReadWrite => canR(auth_val) & canW(auth_val),
-  }) : bool) then {
-    Some(CapEx_PermissionViolation)
-  } else if not(validAddrRange(vaddr, cap_size) | capBoundsInfinite(auth_val)) then {
-    Some(CapEx_InvalidAddressViolation)
-  } else if not(inCapBounds(auth_val, vaddr, cap_size)) then {
-    Some(CapEx_LengthViolation)
-  } else {
-    None()
-  }
-}
-
-function cap_mem_standard_errors(auth_val : Capability, vaddr : virtaddr, acc_type : CapAccessType) -> option(ExecutionResult) = {
-  match cap_mem_access_exception(auth_val, vaddr, acc_type) {
-    Some(e) => {
-      Some(CHERI_Exception(CapCheckType_Data, e, vaddr))
-    },
-    None() => {
-      // All loads and stores of capabilities must be aligned.
-      if not(is_aligned_addr(vaddr, cap_size)) then {
-        Some(Memory_Exception(vaddr, match acc_type {
-          Cap_Read => E_Load_Addr_Align(),
-          Cap_Write => E_SAMO_Addr_Align(),
-          Cap_ReadWrite => E_SAMO_Addr_Align(),
-        }))
-      } else {
-        None()
-      }
-    },
-  }
-}
-
-/* Zero arg */
-
-mapping execution_mode_funct7 : ExecutionMode <-> bits(7) = {
-  CapPtrMode <-> 0b0001001,
-  IntPtrMode <-> 0b0001010,
-}
-
-mapping execution_mode_mnemonic : ExecutionMode <-> string = {
-  CapPtrMode <-> "cap",
-  IntPtrMode <-> "int",
+union clause instruction = CSUB   : (regidx, regidx, regidx)
+/*!
+ * insnref: csub_32bit
+ * Pointer address subtraction
+ *
+ * csub rd, rs1, rs2
+ *
+ * rd is set to addr(rs1) - addr(rs2), modulo 2^XLEN.
+ * Ported from CHERIoT's CSub (cheriot-sail src/cheri_insts.sail:472), with
+ * C(x).address replaced by sign_extend(X(x)[47..0]) -- TruISA keeps pointers
+ * in the integer register file.
+ */
+function clause execute (CSUB(rd, rs1, rs2)) = {
+  X(rd) = sign_extend(X(rs1)[47 .. 0]) - sign_extend(X(rs2)[47 .. 0]);
+  RETIRE_SUCCESS
 }
 
 /* Two arg */
