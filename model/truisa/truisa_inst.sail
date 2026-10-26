@@ -24,8 +24,8 @@ union clause instruction = GCADDR : (regidx, regidx)
  * to rd.
  */
 
-function clause execute (GCBASE(rd, rs1)) = {
-  let capVal = X(rs1);
+function clause execute (GCBASE(rd, cs1)) = {
+  let capVal = X(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
     Some(base, _) => base
@@ -43,8 +43,8 @@ function clause execute (GCBASE(rd, rs1)) = {
  * to rd.
  */
 
-function clause execute (GCBOUND(rd, rs1)) = {
-  let capVal = X(rs1);
+function clause execute (GCBOUND(rd, cs1)) = {
+  let capVal = X(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
     Some(_, bound) => bound 
@@ -62,8 +62,8 @@ function clause execute (GCBOUND(rd, rs1)) = {
  * The tag bits (mode / N/C / PAC) are ignored. A poisoned pointer still
  * yields its real address (only bits 47-0 are read).
  */
-function clause execute (GCADDR(rd, rs1)) = {
-  X(rd) = sign_extend(X(rs1)[47 .. 0]);
+function clause execute (GCADDR(rd, cs1)) = {
+  X(rd) = sign_extend(X(cs1)[47 .. 0]);
   RETIRE_SUCCESS
 }
 
@@ -83,13 +83,13 @@ union clause instruction = CADD : (regidx, regidx, regidx)
  * For CADD, the address is incremented by the value in rs2 .
  * For CADDI, the address is incremented by the immediate value imm.
  */
-function clause execute (CADD(rd, rs1, rs2)) = {
-  let cs1_val = X(rs1);
+function clause execute (CADD(cd, cs1, rs2)) = {
+  let cs1_val = X(cs1);
   let rs2_val = X(rs2);
 
   let newCap = incCapAddrChecked(cs1_val, rs2_val);
 
-  C(rd) = newCap;
+  C(cd) = newCap;
   RETIRE_SUCCESS
 }
 
@@ -252,8 +252,8 @@ union clause instruction = CSUB   : (regidx, regidx, regidx)
  * C(x).address replaced by sign_extend(X(x)[47..0]) -- TruISA keeps pointers
  * in the integer register file.
  */
-function clause execute (CSUB(rd, rs1, rs2)) = {
-  X(rd) = sign_extend(X(rs1)[47 .. 0]) - sign_extend(X(rs2)[47 .. 0]);
+function clause execute (CSUB(rd, cs1, cs2)) = {
+  X(rd) = sign_extend(X(cs1)[47 .. 0]) - sign_extend(X(cs2)[47 .. 0]);
   RETIRE_SUCCESS
 }
 
@@ -261,9 +261,9 @@ function clause execute (CSUB(rd, rs1, rs2)) = {
 
 mapping clause encdec = GCBASE(rd, cs1)                                          if cheri_registers_enabled()
   <-> 0b0001000 @ 0b00101 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
-mapping clause encdec = GCADDR(rd, rs1)                                           if cheri_registers_enabled()
+mapping clause encdec = GCADDR(rd, cs1)                                           if cheri_registers_enabled()
   <-> 0b0001000 @ 0b01001 @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
-mapping clause encdec = CSUB(rd, rs1, rs2)                                        if cheri_registers_enabled()
+mapping clause encdec = CSUB(rd, cs1, cs2)                                        if cheri_registers_enabled()
   <-> 0b0001100 @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
 mapping clause encdec = GCBOUND(rd, cs1)                                          if cheri_registers_enabled()
   <-> 0b0001000 @ 0b01010 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
@@ -272,8 +272,8 @@ mapping clause encdec = CMV(cd, cs1)                                            
   <-> 0b0000110 @ 0b00000 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011 if cheri_registers_enabled()
 
 mapping clause assembly = GCBASE(rd, cs1) <-> "gcbase" ^ spc() ^ reg_name(rd)     ^ sep() ^ reg_name(cs1)
-mapping clause assembly = GCADDR(rd, rs1) <-> "gcaddr" ^ spc() ^ reg_name(rd)     ^ sep() ^ reg_name(rs1)
-mapping clause assembly = CSUB(rd, rs1, rs2) <-> "csub" ^ spc() ^ reg_name(rd)     ^ sep() ^ reg_name(rs1) ^ sep() ^ reg_name(rs2)
+mapping clause assembly = GCADDR(rd, cs1) <-> "gcaddr" ^ spc() ^ reg_name(rd)     ^ sep() ^ reg_name(cs1)
+mapping clause assembly = CSUB(rd, cs1, cs2) <-> "csub" ^ spc() ^ reg_name(rd)     ^ sep() ^ reg_name(cs1) ^ sep() ^ reg_name(cs2)
 mapping clause assembly = GCBOUND(rd, cs1) <-> "gcbound" ^ spc() ^ reg_name(rd)   ^ sep() ^ reg_name(cs1)
 
 mapping clause assembly = CMV(cd, cs1)    <-> "cmv"    ^ spc() ^ reg_name(cd) ^ sep() ^ reg_name(cs1)
