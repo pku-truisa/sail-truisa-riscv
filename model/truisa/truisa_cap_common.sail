@@ -189,19 +189,12 @@ function capToMetadataBits(cap : Capability) -> bits(xlen) = {
 // TODO: We should be able to use bitsToCap(false, zeros()) but there
 // seems to be a bug: https://github.com/rems-project/sail/issues/424
 let null_cap : Capability = struct {
-  tag               = false,
-  sd_perms          = zeros(),
-  ap_m              = null_ap_m,
-  cl                = zeros(),
-  sealed            = false,
-  internal_exponent = true, // Encodes to 0.
-  E                 = cap_max_E, // Encodes to 0.
-  B                 = zeros(),
-  T                 = 0b01 @ zeros(cap_mantissa_width - 2), // Encodes to 0.
-  reserved_0        = zeros(),
-  reserved_1        = zeros(),
-  address           = zeros(),
+  mode    = 0b0,
+  nc      = zeros(),
+  pac     = zeros(),
+  address = zeros(),
 }
+
 
 // Full permission capability.
 let infinite_cap : Capability = {
@@ -309,6 +302,39 @@ function getCapBoundsBits(p : xlenbits) -> option((xlenbits, xlenbits)) = {
   else None()                                                         // CentroID
 }
 
+/* ===== TruISA pointer construction helpers ===== */
+
+// Poisoned pointer: tag bits 63-57 = 0111111, PAC cleared, address preserved.
+// (ADR-0003 rev 21; the address stays so that GCADDR/GCBASE still return it.)
+val  poisonIf : (Capability, bool) -> Capability
+function poisonIf(cap, cond) =
+  if cond then {
+    struct {
+      mode    = 0b0,
+      nc      = 0b111111,
+      pac     = zeros(),
+      address = cap.address,
+    }
+  } else cap
+
+// Smallest slot exponent N (0 .. VA-1) whose slot covers [addr, top).
+// `top` is the EXCLUSIVE upper bound (i.e. addr + L), matching CHERI's
+// setCapBounds(cap, base, top) convention.
+//   N_c = min{ N : SlotBase(addr,N) + 2^N >= top }
+// None() if no such N exists (L too large, or the request crosses the half).
+val  minSlotCovering : (CapAddrBits, CapLenBits) -> option(bits(6))
+function minSlotCovering(addr : CapAddrBits, top : CapLenBits) -> option(bits(6)) = {
+  var found : bool = false;
+  var n : Int = 0;
+  while (n < truisa_va) & not(found) do {
+    let base : CapAddrBits = getCapSlotBase(addr, to_bits(6, n));
+    // slot end (exclusive) = base + 2^n = base + (2^n - 1) + 1
+    let end : CapLenBits = zero_extend(base) + zero_extend(ones(n)) + 1;
+    if end >=_u top then found = true else n = n + 1;
+  };
+  if found then Some(to_bits(6, n)) else None()
+}
+
 // Utility to get the cap bounds (base and top) as integers.
 function getCapBounds(cap : Capability) -> option((CapAddrInt, CapLenInt)) =
   match getCapBoundsBits(cap) {
@@ -318,79 +344,27 @@ function getCapBounds(cap : Capability) -> option((CapAddrInt, CapLenInt)) =
 
 /* An 'ideal' version of setCapBounds as described in paper. */
 function setCapBounds(cap : Capability, base : CapAddrBits, top : CapLenBits) -> (bool, Capability) = {
-  /* {cap with base=base; length=(bits(64)) length; offset=0} */
-  let ext_base = 0b0 @ base;
-  let length = top - ext_base;
-  /* Find an exponent that will put the most significant bit of length
-   * second from the top as assumed during decoding. We ignore the bottom
-   * MW bits because those are handled by the ie = 0 format.
-   */
-  let e = cap_max_E - count_leading_zeros(length[cap_addr_width..cap_mantissa_width - 1]);
-  // Use use internal exponent if e is non-zero or if e is zero but
-  // the implied bit of length is not zero (denormal vs. normal case)
-  let ie = (e != 0) | (not(cap_use_L8) & length[cap_mantissa_width - 2] == bitone);
-
-  /* The non-ie e == 0 case is easy. It is exact so just extract relevant bits. */
-  var Bbits = truncate(base, cap_mantissa_width);
-  var Tbits = truncate(top, cap_mantissa_width);
-  var lostSignificantTop : bool = false;
-  var lostSignificantBase : bool = false;
-  var incE : bool = false;
-
-  if ie then {
-    /* the internal exponent case is trickier */
-
-    /* Extract B and T bits (we lose 2 or 3 bits of each to store the exponent) */
-    var B_ie = truncate(base >> (e + cap_xe_width), cap_mantissa_width - cap_xe_width);
-    var T_ie = truncate(top >> (e + cap_xe_width), cap_mantissa_width - cap_xe_width);
-
-    /* Find out whether we have lost significant bits of base and top using a
-     * mask of bits that we will lose (including 2 or 3 extra for exp).
-     */
-    let maskLo : CapLenBits = zero_extend(ones(e + cap_xe_width));
-    lostSignificantBase = (ext_base & maskLo) != zeros();
-    lostSignificantTop  = (top & maskLo) != zeros();
-
-    if lostSignificantTop then {
-      /* we must increment T to make sure it is still above top even with lost bits.
-         It might wrap around but if that makes B<T then decoding will compensate. */
-      T_ie = T_ie + 1;
-    };
-
-    /* Has the length overflowed? We chose e so that the top two bits of len would be 0b01,
-       but either because of incrementing T or losing bits of base it might have grown. */
-    let len_ie = T_ie - B_ie;
-    if len_ie[cap_mantissa_width - (cap_xe_width + 1)] == bitone then {
-      /* length overflow -- increment E by one and then recalculate
-         T, B etc accordingly */
-      incE = true;
-
-      lostSignificantBase = lostSignificantBase | B_ie[0] == bitone;
-      lostSignificantTop  = lostSignificantTop  | T_ie[0] == bitone;
-
-      B_ie = truncate(base >> (e + cap_xe_width + 1), cap_mantissa_width - cap_xe_width);
-      let incT : range(0,1) = if lostSignificantTop then 1 else 0;
-      T_ie = truncate(top >> (e + cap_xe_width + 1), cap_mantissa_width - cap_xe_width) + incT;
-    };
-
-    Bbits = B_ie @ zeros(cap_xe_width);
-    Tbits = T_ie @ zeros(cap_xe_width);
-  };
-
-  let newCap = {
-    cap with
-    address=base,
-    E=if incE then {
-      // TODO: E can overflow here. The previous code silently wrapped so I've
-      // copied that but I'm not sure it's correct.
-      if e + 1 <= cap_max_E then e + 1 else cap_min_E
-    } else e,
-    B=Bbits,
-    T=Tbits,
-    internal_exponent=ie
-  };
-  let exact = not(lostSignificantBase | lostSignificantTop);
-  (exact, newCap)
+  // TruISA has NO compressed bounds (no E/B/T). Setting bounds means:
+  //   address = base, mode = 1 (aligned slot), nc = N_c,
+  // where N_c is the smallest exponent whose slot covers [base, top).
+  // `top` is the exclusive upper bound, so callers pass base + L.
+  //
+  // The returned `exact` keeps CHERI's signature meaning "the request was
+  // representable" -- in TruISA any request covered by some slot is
+  // representable (over-coverage is normal, not an error; see
+  // spec/insns/scbnds.adoc "判据 ④ 判的是存在覆盖槽，不是槽刚好等于对象").
+  //
+  // TODO(PAC): this leaves `pac` zero. Signing is done by the instruction
+  // (ADR-0005), whose operator is not implemented yet.
+  match minSlotCovering(base, top) {
+    None()  => (false, cap),
+    Some(n) => (true, struct {
+      mode    = 0b1,
+      nc      = n,
+      pac     = zeros(),
+      address = base,
+    })
+  }
 }
 
 function capIsSealed(cap : Capability) -> bool = cap.sealed
