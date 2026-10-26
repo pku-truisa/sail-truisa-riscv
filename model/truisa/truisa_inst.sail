@@ -12,6 +12,8 @@
 
 union clause instruction = GCBASE : (regidx, regidx)
 union clause instruction = GCBOUND: (regidx, regidx)
+union clause instruction = GCADDR : (regidx, regidx)
+union clause instruction = CSUB   : (regidx, regidx, regidx)
 
 /*!
  * insnref: gcbase_32bit
@@ -48,6 +50,37 @@ function clause execute (GCBOUND(rd, rs1)) = {
     None() => zeros(),
     Some(_, bound) => bound 
   };
+  RETIRE_SUCCESS
+}
+
+/*!
+ * insnref: gcaddr_32bit
+ * Get pointer address
+ *
+ * gcaddr rd, rs1
+ *
+ * rd is set to the address field of rs1, sign-extended to XLEN.
+ * The tag bits (mode / N/C / PAC) are ignored. A poisoned pointer still
+ * yields its real address (only bits 47-0 are read).
+ */
+function clause execute (GCADDR(rd, rs1)) = {
+  X(rd) = sign_extend(X(rs1)[47 .. 0]);
+  RETIRE_SUCCESS
+}
+
+/*!
+ * insnref: csub_32bit
+ * Pointer address subtraction
+ *
+ * csub rd, rs1, rs2
+ *
+ * rd is set to addr(rs1) - addr(rs2), modulo 2^XLEN.
+ * Ported from CHERIoT's CSub (cheriot-sail src/cheri_insts.sail:472), with
+ * C(x).address replaced by sign_extend(X(x)[47..0]) -- TruISA keeps pointers
+ * in the integer register file.
+ */
+function clause execute (CSUB(rd, rs1, rs2)) = {
+  X(rd) = sign_extend(X(rs1)[47 .. 0]) - sign_extend(X(rs2)[47 .. 0]);
   RETIRE_SUCCESS
 }
 
@@ -520,11 +553,17 @@ mapping execution_mode_mnemonic : ExecutionMode <-> string = {
 
 mapping clause encdec = GCBASE(rd, cs1)                                          if cheri_registers_enabled()
   <-> 0b0001000 @ 0b00101 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
+mapping clause encdec = GCADDR(rd, rs1)                                           if cheri_registers_enabled()
+  <-> 0b0001000 @ 0b01001 @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
+mapping clause encdec = CSUB(rd, rs1, rs2)                                        if cheri_registers_enabled()
+  <-> 0b0001100 @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
 
 mapping clause encdec = CMV(cd, cs1)                                             if cheri_registers_enabled()
   <-> 0b0000110 @ 0b00000 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011 if cheri_registers_enabled()
 
 mapping clause assembly = GCBASE(rd, cs1) <-> "gcbase" ^ spc() ^ reg_name(rd)     ^ sep() ^ cap_reg_name(cs1)
+mapping clause assembly = GCADDR(rd, rs1) <-> "gcaddr" ^ spc() ^ reg_name(rd)     ^ sep() ^ reg_name(rs1)
+mapping clause assembly = CSUB(rd, rs1, rs2) <-> "csub" ^ spc() ^ reg_name(rd)     ^ sep() ^ reg_name(rs1) ^ sep() ^ reg_name(rs2)
 
 mapping clause assembly = CMV(cd, cs1)    <-> "cmv"    ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1)
 
