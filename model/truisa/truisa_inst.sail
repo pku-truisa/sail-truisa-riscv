@@ -155,20 +155,21 @@ union clause instruction = SCBNDSI : (regidx, regidx, bits(1), bits(5))
  */
 function clause execute (SCBNDSI(cd, cs1, s, uimm5)) = {
   let cs1_val = C(cs1);
-  let length = if s == 0b1 then uimm5 @ 0b0000 else 0b0000 @ uimm5;
+  let length : xlenbits =
+    if s == 0b1 then zero_extend(uimm5 @ 0b0000) else zero_extend(uimm5);
   let newBase = cs1_val.address;
   let newTop : CapLenBits = zero_extend(newBase) + zero_extend(length);
-  assert(xlen >= 32);
-  assert(512 <= cap_max_len);
-  // inCapBoundsNoWrap returns false if the input bounds are malformed.
+  // (3) the source interval must contain the request
+  // TODO(G2): inCapBoundsNoWrap still uses CHERI's top-based half-open test.
   let inBounds = inCapBoundsNoWrap(cs1_val, newBase, unsigned(length));
-  let (exact, newCap) : (bool, Capability) = setCapBounds(cs1_val, newBase, newTop);
-  assert(exact, "SCBNDSI immediate too small for non-exact lengths");
-  let cond = not(inBounds) |
-             boundsMalformed(newCap) |
-             not(capReservedValid(newCap)) |
-             capIsSealed(newCap);
-  C(cd) = clearTagIf(newCap, cond);
+  // (4) a covering slot must exist (exact = "representable", over-coverage is OK)
+  let (exact, newCap) = setCapBounds(cs1_val, newBase, newTop);
+  // Poison instead of trap (spec/insns/scbnds.adoc "异常"):
+  //   (1) L = 0   (2) poisoned source   (3) not in bounds   (4) no covering slot
+  let cond = (length == zeros()) |
+             ((cs1_val.mode == 0b0) & (cs1_val.nc == 0b111111)) |
+             not(inBounds) | not(exact);
+  C(cd) = poisonIf(newCap, cond);
   RETIRE_SUCCESS
 }
 
@@ -191,18 +192,19 @@ union clause instruction = SCBNDS : (regidx, regidx, regidx)
  */
 function clause execute (SCBNDS(cd, cs1, rs2)) = {
   let cs1_val = C(cs1);
-  let length = X(rs2);
+  let length : xlenbits = X(rs2);
   let newBase = cs1_val.address;
   let newTop : CapLenBits = zero_extend(newBase) + zero_extend(length);
-  assert(2 ^ xlen <= cap_max_len);
-  // inCapBoundsNoWrap returns false if the input bounds are malformed.
+  // (3) the source interval must contain the request
+  // TODO(G2): inCapBoundsNoWrap still uses CHERI's top-based half-open test.
   let inBounds = inCapBoundsNoWrap(cs1_val, newBase, unsigned(length));
-  let (exact, newCap) : (bool, Capability) = setCapBounds(cs1_val, newBase, newTop);
-  let cond = not(inBounds & exact) |
-             boundsMalformed(newCap) |
-             not(capReservedValid(newCap)) |
-             capIsSealed(newCap);
-  C(cd) = clearTagIf(newCap, cond);
+  // (4) a covering slot must exist
+  let (exact, newCap) = setCapBounds(cs1_val, newBase, newTop);
+  // Poison instead of trap; same four conditions as SCBNDSI.
+  let cond = (length == zeros()) |
+             ((cs1_val.mode == 0b0) & (cs1_val.nc == 0b111111)) |
+             not(inBounds) | not(exact);
+  C(cd) = poisonIf(newCap, cond);
   RETIRE_SUCCESS
 }
 
