@@ -525,6 +525,20 @@ function capBoundsInfinite(c: Capability) -> bool =
 // `top` is >=2^xlen (in which case every access is in bounds so we don't need
 // to check `addr` or `size` at all.
 function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
+  // --- TruISA guards (D-37). These MUST run before any interval comparison. ---
+  // size = 0     : an empty interval contains no byte. If instead one computed
+  //                `addr + size - 1 <= bound`, that is almost always TRUE
+  //                (addr - 1 <= bound) -> zero-length objects would look valid
+  //                everywhere.
+  // size > 2^VA  : `addr + size - 1` wraps in 64 bits (addr = 0 with
+  //                size = 2^48 + 1 yields 2^48); an unsigned comparison would
+  //                wrongly pass.
+  // TODO(G3): the signature still takes Capability / CapLenInt and the body is
+  //           still CHERI's top-based half-open test. Rewrite together with
+  //           setCapBounds / getCapBounds / inCapBoundsNoWrap.
+  if size == 0 then return false;
+  if size > (2 ^ truisa_va) then return false;
+
   let a = unsigned(addr);
   let max_top = 2 ^ xlen;
   match getCapBounds(cap) {
