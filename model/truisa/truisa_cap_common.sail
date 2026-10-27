@@ -221,6 +221,14 @@ function boundsMalformed(cap : Capability) -> bool = {
 // Get the full cap bounds (base and top) as bit vectors.
 /* ===== TruISA helpers: pointer form decoding (ADR-0003 rev 8) ===== */
 
+// Assemble the 64-bit pointer from its fields: mode | N/C | PAC | address.
+// This is the inverse of bitsToCap and the ONLY way to get the raw 64-bit
+// value out of a Capability. Needed wherever a function takes `xlenbits`
+// (e.g. getCapBoundsBits) but the caller holds a Capability (from C()).
+val  capToBits : Capability -> xlenbits
+function capToBits(c : Capability) -> xlenbits =
+  c.mode @ c.nc @ c.pac @ c.address
+
 // The tag: the top CapTagBits (63-57) of a pointer. Every form decision hangs
 // off this value. Named "Bits" to match the blueprint's getCapBoundsBits.
 val  getCapTagBits : xlenbits -> CapTagBits

@@ -25,11 +25,9 @@ union clause instruction = GCADDR : (regidx, regidx)
  */
 
 function clause execute (GCBASE(rd, cs1)) = {
-  // TODO(G1): getCapBoundsBits needs the FULL 64-bit pointer to tell the
-  // form apart, but X() returns only the address (regval_from_reg =
-  // sign_extend(address) after ruling B). Use capToBits(C(cs1)) once
-  // capToBits exists.
-  let capVal = X(cs1);
+  // getCapBoundsBits takes the raw 64-bit pointer (it must see the tag to
+  // tell the form apart), so rebuild it from the Capability view.
+  let capVal = capToBits(C(cs1));
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
     Some(base, _) => base
@@ -48,11 +46,9 @@ function clause execute (GCBASE(rd, cs1)) = {
  */
 
 function clause execute (GCBOUND(rd, cs1)) = {
-  // TODO(G1): getCapBoundsBits needs the FULL 64-bit pointer to tell the
-  // form apart, but X() returns only the address (regval_from_reg =
-  // sign_extend(address) after ruling B). Use capToBits(C(cs1)) once
-  // capToBits exists.
-  let capVal = X(cs1);
+  // getCapBoundsBits takes the raw 64-bit pointer (it must see the tag to
+  // tell the form apart), so rebuild it from the Capability view.
+  let capVal = capToBits(C(cs1));
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
     Some(_, bound) => bound 
@@ -71,7 +67,7 @@ function clause execute (GCBOUND(rd, cs1)) = {
  * yields its real address (only bits 47-0 are read).
  */
 function clause execute (GCADDR(rd, cs1)) = {
-  X(rd) = sign_extend(X(cs1)[47 .. 0]);
+  X(rd) = sign_extend(C(cs1).address);
   RETIRE_SUCCESS
 }
 
@@ -279,7 +275,7 @@ union clause instruction = CSUB   : (regidx, regidx, regidx)
  * in the integer register file.
  */
 function clause execute (CSUB(rd, cs1, cs2)) = {
-  X(rd) = sign_extend(X(cs1)[47 .. 0]) - sign_extend(X(cs2)[47 .. 0]);
+  X(rd) = sign_extend(C(cs1).address) - sign_extend(C(cs2).address);
   RETIRE_SUCCESS
 }
 
