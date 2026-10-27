@@ -298,19 +298,6 @@ function slotBounds(addr : CapAddrBits, k : Int) -> (CapAddrBits, CapAddrBits) =
   (base, bound)
 }
 
-// Kept from the blueprint for interface compatibility. In TruISA this is ALWAYS
-// false: ADR-0019 rev 5 made bare pointers cover only their own half-space, so
-// no pointer spans the whole address space. Callers must not rely on it ever
-// returning true -- it exists so ported code still compiles and so the concept
-// stays named rather than silently disappearing.
-// This is a CONSTRUCTIVE false, NOT a stub (C3): returning true would
-// contradict ADR-0019 rev 5, so do not "complete" it.
-val  decodedBoundsInfinite : (CapAddrInt, CapLenInt) -> bool
-function decodedBoundsInfinite(base, top) = false
-
-val  capBoundsInfinite : Capability -> bool
-function capBoundsInfinite(c) = false
-
 val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
 function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) = {
   // Returns the endpoints in the ADDRESS domain (48 bits); the instruction
@@ -517,18 +504,15 @@ val  getRepresentableAlignmentMask : xlenbits -> xlenbits
 function getRepresentableAlignmentMask(len : xlenbits) -> xlenbits =
   getRepresentableLength(len) - 1
 
+// NOTE(ADR-0019 rev 5): bare pointers cover only their own half-space
+// (N_p = VA-1), so NO pointer spans the whole address space. That is why the
+// length formula below needs no special case for "infinite" bounds -- the
+// concept does not exist in TruISA.
 function getCapLength(c : Capability) -> CapLenInt =
   match getCapBounds(c) {
     None() => 0,
     Some(base, bound) => {assert(bound >= base); bound - base + 1},
   }
-
-// NOTE(ADR-0019 rev 5): the "infinite bounds" concept is GONE. Bare pointers
-// now cover only their own half-space (N_p = VA-1), so no pointer spans the
-// whole address space. decodedBoundsInfinite / capBoundsInfinite are therefore
-// CONSTRUCTIVELY FALSE -- they always return false by construction, they are
-// NOT unimplemented stubs. Do not "fix" them to ever return true: that would
-// contradict ADR-0019 rev 5, not complete them.
 
 // Return true if the range [addr, addr+size) is in the cap bounds.
 // The upper bound arithmetic is allowed to overflow, wrapping the address space.
