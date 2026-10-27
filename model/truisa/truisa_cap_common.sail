@@ -176,14 +176,29 @@ function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
 // point degenerates when l = 0). This function returns that canonical point.
 // NOTE: computes the address only; `N` is taken from the pointer's N/C field
 //       by the caller (see getCapBoundsBits for the valid range 0..VA-1).
-// TODO(N = 0): a slot of length 1 has NO midline -- S + 2^(-1) is not an
-//   integer, so CentroID is undefined. The current code returns S as a
-//   placeholder; callers must NOT rely on it. Whether this should instead
-//   return None() (i.e. option) is an open spec question.
+//
+// ⛔ The 48-bit point m MUST NOT be used to index the descriptor table. Keys
+//    are always (C, S): a lone point m also names the slot (ctz(m)+1, ...), so
+//    point-keying silently aliases another object's entry -- DCLR would clear
+//    an unrelated entry and a lookup would return someone else's bounds.
+//    `cid == 0` means "none" (see below).  (ADR-0004 rev 4; isa/05; spec/ch05)
+//
+// N = 0 (1-byte slot) has NO CentroID: S + 2^(-1) is not an integer, so the
+// midline does not exist. This is SETTLED, NOT AN OPEN QUESTION --
+//   ADR-0004 corollary + rev 5; isa/03 §3.4.4 item 1; isa/05 §5.5; spec/ch03.
+// It returns 0, the RESERVED value / NULL of this domain, for three reasons:
+//   - every legal CentroID is >= 1 (Aligned C in [1,47] gives S + 2^(C-1) >= 1;
+//     bare gives 2^(VA-1)) and ADR-0004 theorem 6 has codomain m > 0, so 0 is
+//     structurally unreachable -- the only free code point in the domain;
+//   - it depends on NOTHING about p, so it cannot alias a real slot: a lookup
+//     with cid = 0 misses even if the caller forgets to test for it;
+//   - it matches the table-side empty-entry convention (base,bound)==(0,0)
+//     (ADR-0006 decision 3) rather than inventing a second notion of "empty".
+// ⛔ Do NOT make this value depend on p; ⛔ do NOT treat 0 as a legal CentroID.
 val  getCapCentroID : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
 function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
   let base : CapAddrBits = getCapSlotBase(p, n);
-  if n == 0b000000 then base
+  if n == 0b000000 then zeros()          // reserved value, NOT base -- see above
   else base + zero_extend(0b1 @ zeros(unsigned(n) - 1))
 }
 
@@ -192,7 +207,10 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
    SlotBase | (2^N - 1) respectively. It is factored out because the descriptor
    phase (DSTR / DIDW / DGU / DFENCE) needs the CentroID in several places --
    keep this single definition, do not inline it. Its validity domain must
-   follow the same N range as getCapSlotBase (0..VA-1). */
+   follow the same N range as getCapSlotBase (0..VA-1).
+   ⚠️ N = 0 is a VALID input but yields the reserved value 0, so the descriptor
+   phase must treat cid == 0 as a MISS everywhere (DSTR / DCLR / DIDW) -- never
+   as "the entry at address 0". */
 
 /* ===== Bounds of a TruISA pointer =====
    Returns (base, bound) as XLEN integers. `bound` is the INCLUSIVE last byte
