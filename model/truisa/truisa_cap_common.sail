@@ -6,12 +6,6 @@
 /*  SPDX-License-Identifier: BSD-2-Clause                                                */
 /*=======================================================================================*/
 
-// Width of capability in bytes (excluding tag).
-// TODO: Rename to clen_bytes and clen?
-// TODO: Change root xlen to be in terms of the log2 bytes.
-type cap_size : Int = xlen_bytes          // TruISA: pointer is 64-bit (CHERI used xlen_bytes * 2)
-let  cap_size = sizeof(cap_size)
-
 /* ===== TruISA width switch: the ONLY place to change the VA profile ===== */
 // Pointer layout (ADR-0003 rev 12), from the top bit down:
 //   bit 63        mode    truisa_mode_width = 1
@@ -35,6 +29,13 @@ let  truisa_pac_width   = sizeof(truisa_pac_width)
 // ---- CHERI-compatibility aliases: keep the blueprint's field/type names so
 // ---- that the rest of the model needs no renaming. The truisa_* names above
 // ---- remain the ONLY place to change a width.
+
+// Width of capability in bytes (excluding tag).
+// TODO: Rename to clen_bytes and clen?
+// TODO: Change root xlen to be in terms of the log2 bytes.
+type cap_size : Int = xlen_bytes          // TruISA: pointer is 64-bit (CHERI used xlen_bytes * 2)
+let  cap_size = sizeof(cap_size)
+
 type cap_addr_width : Int = truisa_va          // was xlen (CHERI); TruISA uses the VA width
 let  cap_addr_width = sizeof(cap_addr_width)
 type cap_len_width : Int = cap_addr_width + 1
@@ -68,35 +69,9 @@ type CapTagBits   = bits(cap_mode_width + cap_nc_width)
 type CapLenBits   = bits(cap_len_width)
 type CapLenInt    = range(0, cap_max_len)
 
-// Width of TE and BE fields.
-type cap_xe_width : Int = div(cap_E_width, 2)
-let  cap_xe_width = sizeof(cap_xe_width)
-
-// Maximum exponent (24 or 52).
-// The final exponent is calculated by subtracting a 5 or 6 bit value from
-// this, giving a range of 24 .. 0, or 52 .. 0. If the exponent becomes
-// negative then it is ignored.
-type cap_max_E : Int = cap_addr_width - cap_mantissa_width + 2
-let  cap_max_E = sizeof(cap_max_E)
-
-// Negative exponents can be encoded, though these are malformed. We must
-// store all of the possible values (even malformed ones) so that CSetHigh works.
-type cap_min_E : Int = cap_max_E - (2 ^ cap_E_width - 1)
-let  cap_min_E = sizeof(cap_min_E)
-
-type CapExponent = range(cap_min_E, cap_max_E)
-
 // Capability level bits (> 1 is experimental)
 type lvlbits : Int = 1
 let lvlbits = sizeof(lvlbits)
-
-// Encoding of the EF bit to whether or not it's an internal exponent.
-mapping internal_exponent_encdec : bool <-> bits(1) = {
-  // Exponent is zero.
-  false <-> 0b1,
-  // Exponent is internal (stored in L8, TE, BE).
-  true <-> 0b0,
-}
 
 // A partially decompressed version of a capability. Note that this is a
 // losslessly decompressed version. All of the original metadata bits are
@@ -154,19 +129,6 @@ let null_cap : Capability = struct {
 }
 
 // Full permission capability.
-
-// A capability is malformed if its encoding does not describe a valid capability
-// because its bounds cannot be correctly decoded.
-function boundsMalformed(cap : Capability) -> bool = {
-  cap.internal_exponent & ({
-    let MW = cap_mantissa_width;
-
-    let malformedMSB = (cap.E == cap_max_E     & cap.B         != zeros(MW)) |
-                       (cap.E == cap_max_E - 1 & cap.B[MW - 1] != bitzero);
-    let malformedLSB = cap.E < 0 | (cap_use_L8 & cap.E == 0);
-    malformedMSB | malformedLSB
-  })
-}
 
 // Get the full cap bounds (base and top) as bit vectors.
 /* ===== TruISA helpers: pointer form decoding (ADR-0003 rev 8) ===== */
