@@ -255,6 +255,24 @@ function formOf(p : xlenbits) -> CapPtrForm = {
   else FormAligned
 }
 
+// TruISA counterpart of CHERI's boundsMalformed.
+//
+// CHERI asks "does the COMPRESSED encoding describe an illegal capability",
+// with two cases (lost significant bits at the top, or a negative / L8-zero
+// exponent). TruISA has no compressed encoding, so the only code point that is
+// encodable yet illegal is an out-of-range slot exponent -- and formOf()
+// already classifies that as FormInvalid. This predicate exists only so that
+// callers needing a plain yes/no do not have to match on the enum.
+//
+// NOT covered here (deliberately, each is a DIFFERENT state):
+//   - poisoned (bits 63-57 = 0111111): a defined state, not malformed
+//   - CentroID: unsupported in phase 1, not malformed
+//   - bare whose bit47 disagrees with bits 63-57: ADR ruling says COMPUTE
+//     ANYWAY, taking the half from bit 47, so it is not malformed either
+val  boundsMalformed : Capability -> bool
+function boundsMalformed(cap : Capability) -> bool =
+  formOf(capToBits(cap)) == FormInvalid
+
 // Slot endpoints for exponent K: [slot_base(addr,K), slot_base(addr,K)+2^K-1].
 // The bound is an OR because the low K bits of the base are already zero.
 val  slotBounds : (CapAddrBits, Int) -> (CapAddrBits, CapAddrBits)
