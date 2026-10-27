@@ -142,7 +142,22 @@ let null_cap : Capability = struct {
 // CHERI's version sets every permission bit and removes all bounds. TruISA has
 // neither permissions nor an unbounded capability, so the widest pointer it can
 // express covers a whole half-space (K = VA-1). The name is kept so code ported
-// from the blueprint still links; read "infinite" as "half-space-wide".
+// from the blueprint still links.
+//
+// ⛔ THIS CONSTANT IS NOT USABLE AS A POINTER (D-63). Two independent reasons,
+// either one is fatal:
+//   1. address = 0  ->  rejected by the zero-address veto (spec/ch04), which
+//      applies to EVERY form including Bare. It can never be dereferenced.
+//   2. N = VA-1 is inside validNC, so this is an Aligned pointer and must pass
+//      the integrity check -- but pac is hard-wired to zeros(), so verification
+//      fails by construction. Even if it passed, SCBNDS does not move the
+//      address (result address stays 0 -> zero-address veto -> poisoned), and
+//      SCADDR fails the same integrity check, so "move it off zero first"
+//      does not rescue it either.
+//
+// The usable "widest pointer" in TruISA is a half-space full of 1s/0s in the
+// ADDRESS field of a Bare value -- i.e. plain integer arithmetic, no constant
+// needed. Kept here only for link compatibility; do not build on it.
 val  infinite_cap : Capability
 let  infinite_cap = struct {
   mode    = 0b1,
@@ -517,11 +532,11 @@ function getCapLength(c : Capability) -> CapLenInt =
   }
 
 // NOTE(ADR-0019 rev 5): the "infinite bounds" concept is GONE. Bare pointers
-// now cover only their own half-space (N_p = VA-1), so there is no pointer
-// whose bounds span the whole address space. The former helpers
-// decodedBoundsInfinite / capBoundsInfinite were dead predicates anyway
-// (`top >= 2^xlen` can never hold when top comes from a 48-bit field) and have
-// been removed rather than fixed.
+// now cover only their own half-space (N_p = VA-1), so no pointer spans the
+// whole address space. decodedBoundsInfinite / capBoundsInfinite are therefore
+// CONSTRUCTIVELY FALSE -- they always return false by construction, they are
+// NOT unimplemented stubs. Do not "fix" them to ever return true: that would
+// contradict ADR-0019 rev 5, not complete them.
 
 // Return true if the range [addr, addr+size) is in the cap bounds.
 // The upper bound arithmetic is allowed to overflow, wrapping the address space.
