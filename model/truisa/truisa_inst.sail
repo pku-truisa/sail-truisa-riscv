@@ -16,12 +16,26 @@ union clause instruction = GCADDR : (regidx, regidx)
 
 /*!
  * insnref: gcbase_32bit
- * Capability get base address
+ * Get the first byte of the slot containing cs1
  *
- * gcbase rd, rs1
+ * gcbase rd, cs1
  *
- * Decode the base integer address from cs1's bounds and write the result
- * to rd.
+ *   rd = sign_extend_48( slot_base(addr(cs1), K) )
+ *   K  = N        for an aligned slot
+ *   K  = VA - 1   for a bare pointer (i.e. its half-space)
+ *
+ * The result is SIGN-EXTENDED from the 48-bit address domain up to XLEN.
+ * This step cannot be dropped even though the blueprint appears not to have
+ * it: there CapAddrBits is already bits(xlen), so the extension is the
+ * identity. TruISA's address field is narrower than the register (the top 16
+ * bits carry the tag), so the extension has to be written out explicitly.
+ *
+ * SIGN rather than ZERO extension, because the high half holds negative
+ * addresses: -1 must become 0xFFFF_FFFF_FFFF_FFFF, not 0x0000_FFFF_FFFF_FFFF.
+ * spec/insns/gcbase.adoc spells this as sign_extend_48.
+ *
+ * A poisoned pointer yields 0, as do the unsupported forms (out-of-range N,
+ * CentroID in phase 1) -- this instruction has no failure exit and never traps.
  */
 
 function clause execute (GCBASE(rd, cs1)) = {
@@ -35,12 +49,27 @@ function clause execute (GCBASE(rd, cs1)) = {
 
 /*!
  * insnref: gcbound_32bit
- * Capability get bound address
+ * Get the last byte of the slot containing cs1
  *
- * gcbase rd, rs1
+ * gcbound rd, cs1
  *
- * Decode the bound integer address from rs1's bounds and write the result
- * to rd.
+ *   rd = sign_extend_48( slot_base(addr(cs1), K) + 2^K - 1 )
+ *   K  = N        for an aligned slot
+ *   K  = VA - 1   for a bare pointer (i.e. its half-space)
+ *
+ * This is the CLOSED-interval last byte, not an exclusive upper bound: the
+ * length of the region is gcbound - gcbase + 1.
+ *
+ * The result is SIGN-EXTENDED from the 48-bit address domain up to XLEN, for
+ * the same two reasons as its counterpart gcbase:
+ *   (a) TruISA's address field is narrower than the register, so unlike the
+ *       blueprint (CapAddrBits = bits(xlen)) the extension is not the identity;
+ *   (b) the high half holds negative addresses, so ZERO extension would turn
+ *       -1 into 0x0000_FFFF_FFFF_FFFF instead of 0xFFFF_FFFF_FFFF_FFFF.
+ * spec/insns/gcbound.adoc spells this as sign_extend_48.
+ *
+ * A poisoned pointer yields 0, as do the unsupported forms (out-of-range N,
+ * CentroID in phase 1) -- this instruction has no failure exit and never traps.
  */
 
 function clause execute (GCBOUND(rd, cs1)) = {
