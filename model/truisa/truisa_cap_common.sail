@@ -202,33 +202,68 @@ function getCapCentroID(p : CapAddrBits, n : bits(6)) -> CapAddrBits = {
        (ADR-0019 rev 5 dropping the "Len = 2^48 special case" concerns the
        Bare form, NOT N=48.)
 */
+/* ===== TruISA pointer form: the ONE place that decides what a pointer is =====
+ * ADR-0003 rev 12. Every caller that needs to know "what kind of pointer is
+ * this / is it usable" must ask formOf() rather than re-deriving it, otherwise
+ * the checks drift apart (that is exactly how the CHERI boundsMalformed /
+ * getCapBoundsBits pair ended up disagreeing).
+ *
+ * Decision order is forced by the bit patterns:
+ *   bits 63-57 = 0111111  -> poisoned        (checked FIRST: 0111111 would
+ *                                             otherwise look like N/C = 63)
+ *   bits 63-57 = 0000000  -> bare (low half)
+ *   bits 63-57 = 1111111  -> bare (high half)  (1111111 would otherwise look
+ *                                             like mode=1, N/C=63)
+ *   bit 63 = 0            -> CentroID form (unsupported in phase 1)
+ *   N/C >= VA             -> invalid code point
+ *   otherwise             -> aligned slot
+ */
+enum CapPtrForm = {
+  FormPoisoned,
+  FormBare,
+  FormAligned,
+  FormInvalid,
+  FormCentroID,
+}
+
+val  formOf : xlenbits -> CapPtrForm
+function formOf(p : xlenbits) -> CapPtrForm = {
+  let tag7 : CapTagBits = getCapTagBits(p);
+  if      tag7 == 0b0111111 then FormPoisoned
+  else if tag7 == 0b0000000 then FormBare
+  else if tag7 == 0b1111111 then FormBare
+  else if p[63] == 0b0      then FormCentroID
+  else if unsigned(p[62 .. 57]) >= truisa_va then FormInvalid
+  else FormAligned
+}
+
+// Slot endpoints for exponent K: [slot_base(addr,K), slot_base(addr,K)+2^K-1].
+// The bound is an OR because the low K bits of the base are already zero.
+val  slotBounds : (CapAddrBits, Int) -> (CapAddrBits, CapAddrBits)
+function slotBounds(addr : CapAddrBits, k : Int) -> (CapAddrBits, CapAddrBits) = {
+  let base  : CapAddrBits = getCapSlotBase(addr, to_bits(6, k));
+  let bound : CapAddrBits = base | zero_extend(ones(k));
+  (base, bound)
+}
+
 val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
 function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) = {
   // Returns the endpoints in the ADDRESS domain (48 bits); the instruction
   // sign-extends them to XLEN itself (spec/insns/gcbase.adoc and gcbound.adoc
   // both wrap the result in sign_extend_48).
   //
-  // Bare and Aligned are UNIFIED into one slot formula, following the spec:
+  // Bare and Aligned are UNIFIED into one formula, following the spec:
   //   let K = (form == bare) ? VA - 1 : N(cs1);
   // so a bare pointer is simply a slot with K = VA-1 (one half-space).
   //
-  // TODO(phase 2): the descriptor form still returns None().
+  // The form decision itself lives in formOf(); this function only maps a
+  // usable form to endpoints.
   let p : xlenbits = capToBits(c);
-  let tag7 : CapTagBits = getCapTagBits(p);
   let addr : CapAddrBits = p[47 .. 0];
-
-  if tag7 == 0b0111111 then None()                                    // poisoned
-  else {
-    let is_bare : bool = (tag7 == 0b0000000) | (tag7 == 0b1111111);
-    let k : Int = if is_bare then truisa_va - 1 else unsigned(p[62 .. 57]);
-    if (not(is_bare) & (p[63] == 0b0)) then None()                    // CentroID form, phase 1
-    else if k >= truisa_va then None()                                // N must be in 0..VA-1 (ADR-0005 dec 6)
-    else {
-      let base  : CapAddrBits = getCapSlotBase(addr, to_bits(6, k));
-      // base + 2^k - 1, done as OR because base's low k bits are zero
-      let bound : CapAddrBits = base | zero_extend(ones(k));
-      Some(base, bound)
-    }
+  match formOf(p) {
+    FormBare    => { let (b, e) = slotBounds(addr, truisa_va - 1); Some(b, e) },
+    FormAligned => { let (b, e) = slotBounds(addr, unsigned(p[62 .. 57])); Some(b, e) },
+    _           => None(),          // poisoned / invalid / CentroID (phase 1)
   }
 }
 
