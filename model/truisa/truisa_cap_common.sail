@@ -490,6 +490,16 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   // TODO(G3): the signature still takes Capability / CapLenInt and the body is
   //           still CHERI's top-based half-open test. Rewrite together with
   //           setCapBounds / getCapBounds / inCapBoundsNoWrap.
+  // --- Zero-address veto (spec/ch04 "零地址判据"). Independent of the three
+  // --- steps, and applies to EVERY form including Bare: address 0 is reserved
+  // --- as NULL. The bounds interval is NOT shrunk (it still starts at 0), so
+  // --- GCBASE(Bare) and Len = bound - base + 1 keep their formulas.
+  // --- Exit for loads/stores is the exception (TYPE,CAUSE) = (1,3); here we
+  // --- only answer the predicate, the caller raises it.
+  // --- NOTE: this rejects the ACCESS, not the CONSTRUCTION -- SCBNDS/SCBNDSI
+  // --- may still produce an addr==0 pointer; derived stores that would MOVE a
+  // --- pointer to 0 must poison instead (not implemented yet, G2).
+  if addr == zeros() then return false;
   if size == 0 then return false;
   if size > (2 ^ truisa_va) then return false;
 
