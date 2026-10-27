@@ -158,6 +158,18 @@ let null_cap : Capability = struct {
 // The usable "widest pointer" in TruISA is a half-space full of 1s/0s in the
 // ADDRESS field of a Bare value -- i.e. plain integer arithmetic, no constant
 // needed. Kept here only for link compatibility; do not build on it.
+//
+// ⚠️ C1 -- READING IT BACK LOOKS HEALTHY, AND THAT IS THE TRAP. The projection
+// instructions answer normally (isa/04 §4.3.1 row 4: integer-output
+// instructions are unaffected by the pointer being unusable):
+//     GCADDR       -> 0
+//     GCBASE       -> 0                    (slotBase(0, VA-1))
+//     GCBOUND      -> 2^(VA-1) - 1         the "widest half-space" answer
+//     getCapLength -> 2^(VA-1)
+// So a self-check written as "probe with GCBASE/GCBOUND, then decide" concludes
+// "this is a valid wide pointer" and only fails on the NEXT step (deref ->
+// exception (1,3); used as a parent -> poisoned 0111111).
+// => READING IT BACK IS NOT A VALIDITY CHECK.
 val  infinite_cap : Capability
 let  infinite_cap = struct {
   mode    = 0b1,
@@ -313,6 +325,8 @@ function slotBounds(addr : CapAddrBits, k : Int) -> (CapAddrBits, CapAddrBits) =
 // no pointer spans the whole address space. Callers must not rely on it ever
 // returning true -- it exists so ported code still compiles and so the concept
 // stays named rather than silently disappearing.
+// This is a CONSTRUCTIVE false, NOT a stub (C3): returning true would
+// contradict ADR-0019 rev 5, so do not "complete" it.
 val  decodedBoundsInfinite : (CapAddrInt, CapLenInt) -> bool
 function decodedBoundsInfinite(base, top) = false
 
