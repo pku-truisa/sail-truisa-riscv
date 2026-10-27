@@ -99,90 +99,27 @@ struct Capability = {
 
 // Decode compressed capability to a more convenient struct.
 function bitsToCap(tag : bool, cap_bits : CapBits) -> Capability = {
-  // Decode metadata to fields.
-  let meta = dec_EncMetadata(cap_bits[xlen * 2 - 1 .. xlen]);
-
-  let internal_exponent = internal_exponent_encdec(meta.EF);
-
-  // For brevity and to match the spec.
-  let 'MW = cap_mantissa_width;
-
-  let E : CapExponent = if internal_exponent then cap_max_E - unsigned(getMetadataInternalExponent(meta)) else 0;
-
-  // When the exponent is non-zero (internal_exponent is true) we implicitly
-  // store the leading 1, just as with normal floating point numbers.
-  // The case when the exponent is zero is equivalent to subnormals.
-  let LMSB = if internal_exponent then 0b01 else 0b0 @ getMetadataL8(meta);
-
-  // `not()` so type infererence for zeros() works.
-  let T_low = if not(internal_exponent) then meta.TE else zeros();
-  let B_low = if not(internal_exponent) then meta.BE else zeros();
-
-  // Concatenate all the bits. Type annotations are not require but here for sanity checking.
-  let T : bits('MW - 2) = meta.Tm @ T_low;
-  let B : bits('MW)     = meta.Bm @ B_low;
-
-  let LCout = if T <_u B[MW - 3 .. 0] then 0b01 else 0b00;
-
-  // Prepend the reconstructed top two bits of T.
-  let T = (B[MW - 1 .. MW - 2] + LCout + LMSB) @ T;
-
+  // TruISA has NO compressed encoding: the 64-bit word IS the pointer, so
+  // decoding is a plain field split.
+  // `tag` is CHERI's out-of-band validity bit; TruISA carries it in-band in
+  // bits 63-57, so this argument is IGNORED BY DESIGN (D-44 ruling 丙).
+  //   bit 63     mode
+  //   bits 62-57 N/C
+  //   bits 56-48 PAC
+  //   bits 47-0  address
   struct {
-    tag               = tag,
-    sd_perms          = meta.SDP,
-    ap_m              = meta.AP_M,
-    cl                = meta.CL,
-    sealed            = bool_bits(meta.CT),
-    internal_exponent = internal_exponent,
-    E                 = E,
-    B                 = B,
-    T                 = T,
-    reserved_0        = meta.reserved_0,
-    reserved_1        = meta.reserved_1,
-    address           = cap_bits[xlen - 1 .. 0],
+    mode    = cap_bits[63],
+    nc      = cap_bits[62 .. 57],
+    pac     = cap_bits[56 .. 48],
+    address = cap_bits[47 .. 0],
   }
 }
 
 // Encode a capability to compressed form. Only the metadata is returned since
 // the tag and address are directly available in `cap`.
 function capToMetadataBits(cap : Capability) -> bits(xlen) = {
-  // Convert the exponent back to encoded form.
-  let E = to_bits(cap_E_width, cap_max_E - cap.E);
-
-  // The L8 value here is ignored on RV64.
-  let (L8, TE, BE) = if cap.internal_exponent then {
-    (
-      E[cap_E_width - 1],
-      E[cap_xe_width * 2 - 1 .. cap_xe_width],
-      E[cap_xe_width - 1 .. 0]
-    )
-  } else {
-    (
-      (cap.T - cap.B)[8],
-      cap.T[cap_xe_width - 1 .. 0],
-      cap.B[cap_xe_width - 1 .. 0]
-    )
-  };
-
-  let MW = cap_mantissa_width;
-
-  let meta : EncMetadata = struct {
-    SDP = cap.sd_perms,
-    AP_M = cap.ap_m,
-    CL = cap.cl,
-    CT = bool_bits(cap.sealed),
-    EF = internal_exponent_encdec(cap.internal_exponent),
-    Tm = cap.T[MW - 3 .. cap_xe_width],
-    Bm = cap.B[MW - 1 .. cap_xe_width],
-    TE = TE,
-    BE = BE,
-    reserved_1 = cap.reserved_1,
-    reserved_0 = cap.reserved_0,
-    L8 = zeros()
-  };
-  // Set L8 on RV32. Does nothing on RV64.
-  let meta = setMetadataL8(meta, [L8]);
-  enc_EncMetadata(meta)
+  // TruISA has no separate metadata word -- the pointer IS its own metadata.
+  capToBits(cap)
 }
 
 // Zero permission capability.
@@ -195,15 +132,7 @@ let null_cap : Capability = struct {
   address = zeros(),
 }
 
-
 // Full permission capability.
-let infinite_cap : Capability = {
-  null_cap with
-  tag      = true,
-  sd_perms = ones(),
-  cl       = ones(),
-  ap_m     = infinite_ap_m,
-}
 
 // A capability is malformed if its encoding does not describe a valid capability
 // because its bounds cannot be correctly decoded.
@@ -728,17 +657,3 @@ function capToString(cap : Capability) -> string = {
   raw_str ^ res_str
 }
 
-function getRepresentableAlignmentMask(len : xlenbits) -> xlenbits = {
-  let (_exact, c) = setCapBounds(infinite_cap, zeros(), 0b0 @ len);
-  if c.internal_exponent then {
-    // setCapBounds will never make a malformed cap with E < 0.
-    let e = c.E;
-    assert(e >= 0);
-    ~(zero_extend(ones(e + cap_xe_width)))
-  } else ones()
-}
-
-function getRepresentableLength(len : xlenbits) -> xlenbits = {
-  let m = getRepresentableAlignmentMask(len);
-  (len + ~(m)) & m
-}
