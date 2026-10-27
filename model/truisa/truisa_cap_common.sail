@@ -87,8 +87,8 @@ struct Capability = {
   // 2026-10-26: the `bit 56` reserved bit is REMOVED; PAC width = 57 - VA
   //             (Sv39 -> 18, Sv48 -> 9, Sv57 -> 0, i.e. no PAC at all).
   //             Sv57 (pac width 0) is NOT validated: this model instantiates Sv48.
-  mode    : bits(1),
-  nc      : bits(6),
+  mode    : bits(cap_mode_width),
+  nc      : bits(cap_nc_width),
   pac     : CapPacBits,
   address : CapAddrBits,
 }
@@ -149,8 +149,8 @@ function getCapTagBits(p : xlenbits) -> CapTagBits =
 
 // Slot base of an aligned-slot pointer: SlotBase = p & ~(2^N - 1)
 // (docs/isa/04; ADR-0010 decision 4). Operates inside the address field only.
-val  getCapSlotBase : (CapAddrBits, bits(6)) -> CapAddrBits
-function getCapSlotBase(p : CapAddrBits, n : bits(6)) -> CapAddrBits =
+val  getCapSlotBase : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
+function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
   p & ~(zero_extend(ones(unsigned(n))))
 
 // CentroID canonical representative point: m = SlotBase + 2^(N-1)  (ADR-0004)
@@ -164,8 +164,8 @@ function getCapSlotBase(p : CapAddrBits, n : bits(6)) -> CapAddrBits =
 //   integer, so CentroID is undefined. The current code returns S as a
 //   placeholder; callers must NOT rely on it. Whether this should instead
 //   return None() (i.e. option) is an open spec question.
-val  getCapCentroID : (CapAddrBits, bits(6)) -> CapAddrBits
-function getCapCentroID(p : CapAddrBits, n : bits(6)) -> CapAddrBits = {
+val  getCapCentroID : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
+function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
   let base : CapAddrBits = getCapSlotBase(p, n);
   if n == 0b000000 then base
   else base + zero_extend(0b1 @ zeros(unsigned(n) - 1))
@@ -241,7 +241,7 @@ function formOf(p : xlenbits) -> CapPtrForm = {
 // The bound is an OR because the low K bits of the base are already zero.
 val  slotBounds : (CapAddrBits, Int) -> (CapAddrBits, CapAddrBits)
 function slotBounds(addr : CapAddrBits, k : Int) -> (CapAddrBits, CapAddrBits) = {
-  let base  : CapAddrBits = getCapSlotBase(addr, to_bits(6, k));
+  let base  : CapAddrBits = getCapSlotBase(addr, to_bits(cap_nc_width, k));
   let bound : CapAddrBits = base | zero_extend(ones(k));
   (base, bound)
 }
@@ -287,17 +287,17 @@ function poisonIf(cap, cond) =
 // setCapBounds(cap, base, top) convention.
 //   N_c = min{ N : SlotBase(addr,N) + 2^N >= top }
 // None() if no such N exists (L too large, or the request crosses the half).
-val  minSlotCovering : (CapAddrBits, CapLenBits) -> option(bits(6))
-function minSlotCovering(addr : CapAddrBits, top : CapLenBits) -> option(bits(6)) = {
+val  minSlotCovering : (CapAddrBits, CapLenBits) -> option(bits(cap_nc_width))
+function minSlotCovering(addr : CapAddrBits, top : CapLenBits) -> option(bits(cap_nc_width)) = {
   var found : bool = false;
   var n : Int = 0;
   while (n < truisa_va) & not(found) do {
-    let base : CapAddrBits = getCapSlotBase(addr, to_bits(6, n));
+    let base : CapAddrBits = getCapSlotBase(addr, to_bits(cap_nc_width, n));
     // slot end (exclusive) = base + 2^n = base + (2^n - 1) + 1
     let end : CapLenBits = zero_extend(base) + zero_extend(ones(n)) + 1;
     if end >=_u top then found = true else n = n + 1;
   };
-  if found then Some(to_bits(6, n)) else None()
+  if found then Some(to_bits(cap_nc_width, n)) else None()
 }
 
 // Utility to get the cap bounds (base and top) as integers.
