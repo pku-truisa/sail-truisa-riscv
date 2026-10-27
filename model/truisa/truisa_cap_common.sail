@@ -32,10 +32,17 @@ let  truisa_nc_width    = sizeof(truisa_nc_width)
 type truisa_pac_width   : Int = truisa_ptr_width - truisa_va - truisa_mode_width - truisa_nc_width
 let  truisa_pac_width   = sizeof(truisa_pac_width)
 
+// ---- CHERI-compatibility aliases: keep the blueprint's field/type names so
+// ---- that the rest of the model needs no renaming. The truisa_* names above
+// ---- remain the ONLY place to change a width.
 type cap_addr_width : Int = truisa_va          // was xlen (CHERI); TruISA uses the VA width
 let  cap_addr_width = sizeof(cap_addr_width)
 type cap_len_width : Int = cap_addr_width + 1
 let  cap_len_width = sizeof(cap_len_width)
+type cap_mode_width : Int = truisa_mode_width
+let  cap_mode_width = sizeof(cap_mode_width)
+type cap_nc_width : Int = truisa_nc_width
+let  cap_nc_width = sizeof(cap_nc_width)
 type cap_pac_width : Int = truisa_pac_width
 let  cap_pac_width = sizeof(cap_pac_width)
 
@@ -55,7 +62,7 @@ type CapPacBits   = bits(cap_pac_width)
 // Tag = mode + N/C = the top bits left after address and PAC. Substituting
 // PAC = 57 - VA gives 1 + 6 = 7 for EVERY profile, which is exactly ADR-0003
 // rev 12: the tag is bits 63-57 and its width does not vary across profiles.
-type CapTagBits   = bits(truisa_mode_width + truisa_nc_width)
+type CapTagBits   = bits(cap_mode_width + cap_nc_width)
 
 // XLEN+1 (33 or 65).
 type CapLenBits   = bits(cap_len_width)
