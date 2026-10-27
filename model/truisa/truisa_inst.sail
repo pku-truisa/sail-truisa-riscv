@@ -28,7 +28,7 @@ function clause execute (GCBASE(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(base, _) => base
+    Some(base, _) => sign_extend(base)
   };
   RETIRE_SUCCESS
 }
@@ -47,7 +47,7 @@ function clause execute (GCBOUND(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(_, bound) => bound 
+    Some(_, bound) => sign_extend(bound)
   };
   RETIRE_SUCCESS
 }

@@ -219,27 +219,34 @@ function getCapCentroID(p : CapAddrBits, n : bits(6)) -> CapAddrBits = {
        (ADR-0019 rev 5 dropping the "Len = 2^48 special case" concerns the
        Bare form, NOT N=48.)
 */
-val  getCapBoundsBits : Capability -> option((xlenbits, xlenbits))
-function getCapBoundsBits(c : Capability) -> option((xlenbits, xlenbits)) = {
-  // Takes the Capability view, like CHERI's original. The raw 64-bit word
-  // is rebuilt here so the form test can see the tag.
+val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
+function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) = {
+  // Returns the endpoints in the ADDRESS domain (48 bits); the instruction
+  // sign-extends them to XLEN itself (spec/insns/gcbase.adoc and gcbound.adoc
+  // both wrap the result in sign_extend_48).
+  //
+  // Bare and Aligned are UNIFIED into one slot formula, following the spec:
+  //   let K = (form == bare) ? VA - 1 : N(cs1);
+  // so a bare pointer is simply a slot with K = VA-1 (one half-space).
+  //
+  // TODO(phase 2): the descriptor form still returns None().
   let p : xlenbits = capToBits(c);
   let tag7 : CapTagBits = getCapTagBits(p);
-  let low_mask : xlenbits = zero_extend(ones(truisa_va - 1));   // 2^(VA-1) - 1
+  let addr : CapAddrBits = p[47 .. 0];
 
-  if      tag7 == 0b0000000 then Some(zeros(), low_mask)              // Bare, low half
-  else if tag7 == 0b1111111 then Some(~low_mask, ones(64))            // Bare, high half
-  else if tag7 == 0b0111111 then None()                               // poisoned
-  else if p[63] == 0b1 then {                                         // Aligned
-    let n : bits(6) = p[62 .. 57];
-    if unsigned(n) >= truisa_va then None()                           // N must be in 0..VA-1 (ADR-0005 dec 6)
+  if tag7 == 0b0111111 then None()                                    // poisoned
+  else {
+    let is_bare : bool = (tag7 == 0b0000000) | (tag7 == 0b1111111);
+    let k : Int = if is_bare then truisa_va - 1 else unsigned(p[62 .. 57]);
+    if (not(is_bare) & (p[63] == 0b0)) then None()                    // CentroID form, phase 1
+    else if k >= truisa_va then None()                                // N must be in 0..VA-1 (ADR-0005 dec 6)
     else {
-      let base : CapAddrBits = getCapSlotBase(p[47 .. 0], n);
-      let mask : CapAddrBits = zero_extend(ones(unsigned(n)));
-      Some(sign_extend(base), sign_extend(base | mask))
+      let base  : CapAddrBits = getCapSlotBase(addr, to_bits(6, k));
+      // base + 2^k - 1, done as OR because base's low k bits are zero
+      let bound : CapAddrBits = base | zero_extend(ones(k));
+      Some(base, bound)
     }
   }
-  else None()                                                         // CentroID
 }
 
 /* ===== TruISA pointer construction helpers ===== */
