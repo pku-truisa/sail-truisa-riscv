@@ -157,7 +157,7 @@ val  getCapTagBits : xlenbits -> CapTagBits
 function getCapTagBits(p : xlenbits) -> CapTagBits =
   p[truisa_ptr_width - 1 .. truisa_ptr_width - cap_mode_width - cap_nc_width]
 
-// The N/C field: the bits just below mode. Split out because both formOf and
+// The N/C field: the bits just below mode. Split out because both getCapForm and
 // getCapBoundsBits need it, and duplicating the slice invites bit-position drift.
 val  getCapN : xlenbits -> bits(cap_nc_width)
 function getCapN(p : xlenbits) -> bits(cap_nc_width) =
@@ -238,7 +238,7 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
 */
 /* ===== TruISA pointer form: the ONE place that decides what a pointer is =====
  * ADR-0003 rev 12. Every caller that needs to know "what kind of pointer is
- * this / is it usable" must ask formOf() rather than re-deriving it, otherwise
+ * this / is it usable" must ask getCapForm() rather than re-deriving it, otherwise
  * the checks drift apart (that is exactly how the CHERI boundsMalformed /
  * getCapBoundsBits pair ended up disagreeing).
  *
@@ -260,8 +260,8 @@ enum CapPtrForm = {
   FormCentroID,
 }
 
-val  formOf : xlenbits -> CapPtrForm
-function formOf(p : xlenbits) -> CapPtrForm = {
+val  getCapForm : xlenbits -> CapPtrForm
+function getCapForm(p : xlenbits) -> CapPtrForm = {
   let tag7 : CapTagBits = getCapTagBits(p);
   if      tag7 == 0b0111111 then FormPoisoned
   else if tag7 == 0b0000000 then FormBare
@@ -276,7 +276,7 @@ function formOf(p : xlenbits) -> CapPtrForm = {
 // CHERI asks "does the COMPRESSED encoding describe an illegal capability",
 // with two cases (lost significant bits at the top, or a negative / L8-zero
 // exponent). TruISA has no compressed encoding, so the only code point that is
-// encodable yet illegal is an out-of-range slot exponent -- and formOf()
+// encodable yet illegal is an out-of-range slot exponent -- and getCapForm()
 // already classifies that as FormInvalid. This predicate exists only so that
 // callers needing a plain yes/no do not have to match on the enum.
 //
@@ -287,7 +287,7 @@ function formOf(p : xlenbits) -> CapPtrForm = {
 //     ANYWAY, taking the half from bit 47, so it is not malformed either
 val  boundsMalformed : Capability -> bool
 function boundsMalformed(cap : Capability) -> bool =
-  formOf(capToBits(cap)) == FormInvalid
+  getCapForm(capToBits(cap)) == FormInvalid
 
 // Slot endpoints for exponent K: [slot_base(addr,K), slot_base(addr,K)+2^K-1].
 // The bound is an OR because the low K bits of the base are already zero.
@@ -321,11 +321,11 @@ function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) 
   //   let K = (form == bare) ? VA - 1 : N(cs1);
   // so a bare pointer is simply a slot with K = VA-1 (one half-space).
   //
-  // The form decision itself lives in formOf(); this function only maps a
+  // The form decision itself lives in getCapForm(); this function only maps a
   // usable form to endpoints.
   let p : xlenbits = capToBits(c);
   let addr : CapAddrBits = p[47 .. 0];
-  match formOf(p) {
+  match getCapForm(p) {
     FormBare    => { let (b, e) = slotBounds(addr, truisa_va - 1); Some(b, e) },
     FormAligned => { let (b, e) = slotBounds(addr, unsigned(getCapN(p))); Some(b, e) },
     _           => None(),          // poisoned / invalid / CentroID (phase 1)
