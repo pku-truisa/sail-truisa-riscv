@@ -138,46 +138,6 @@ let null_cap : Capability = struct {
   address = zeros(),
 }
 
-// TruISA counterpart of CHERI's infinite_cap.
-// CHERI's version sets every permission bit and removes all bounds. TruISA has
-// neither permissions nor an unbounded capability, so the widest pointer it can
-// express covers a whole half-space (K = VA-1). The name is kept so code ported
-// from the blueprint still links.
-//
-// ⛔ THIS CONSTANT IS NOT USABLE AS A POINTER (D-63). Two independent reasons,
-// either one is fatal:
-//   1. address = 0  ->  rejected by the zero-address veto (spec/ch04), which
-//      applies to EVERY form including Bare. It can never be dereferenced.
-//   2. N = VA-1 is inside validNC, so this is an Aligned pointer and must pass
-//      the integrity check -- but pac is hard-wired to zeros(), so verification
-//      fails by construction. Even if it passed, SCBNDS does not move the
-//      address (result address stays 0 -> zero-address veto -> poisoned), and
-//      SCADDR fails the same integrity check, so "move it off zero first"
-//      does not rescue it either.
-//
-// The usable "widest pointer" in TruISA is a half-space full of 1s/0s in the
-// ADDRESS field of a Bare value -- i.e. plain integer arithmetic, no constant
-// needed. Kept here only for link compatibility; do not build on it.
-//
-// ⚠️ C1 -- READING IT BACK LOOKS HEALTHY, AND THAT IS THE TRAP. The projection
-// instructions answer normally (isa/04 §4.3.1 row 4: integer-output
-// instructions are unaffected by the pointer being unusable):
-//     GCADDR       -> 0
-//     GCBASE       -> 0                    (slotBase(0, VA-1))
-//     GCBOUND      -> 2^(VA-1) - 1         the "widest half-space" answer
-//     getCapLength -> 2^(VA-1)
-// So a self-check written as "probe with GCBASE/GCBOUND, then decide" concludes
-// "this is a valid wide pointer" and only fails on the NEXT step (deref ->
-// exception (1,3); used as a parent -> poisoned 0111111).
-// => READING IT BACK IS NOT A VALIDITY CHECK.
-val  infinite_cap : Capability
-let  infinite_cap = struct {
-  mode    = 0b1,
-  nc      = to_bits(cap_nc_width, truisa_va - 1),
-  pac     = zeros(),
-  address = zeros(),
-}
-
 // Get the full cap bounds (base and top) as bit vectors.
 /* ===== TruISA helpers: pointer form decoding (ADR-0003 rev 8) ===== */
 
