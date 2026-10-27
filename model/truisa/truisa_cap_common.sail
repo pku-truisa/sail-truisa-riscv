@@ -138,7 +138,18 @@ let null_cap : Capability = struct {
   address = zeros(),
 }
 
-// Full permission capability.
+// TruISA counterpart of CHERI's infinite_cap.
+// CHERI's version sets every permission bit and removes all bounds. TruISA has
+// neither permissions nor an unbounded capability, so the widest pointer it can
+// express covers a whole half-space (K = VA-1). The name is kept so code ported
+// from the blueprint still links; read "infinite" as "half-space-wide".
+val  infinite_cap : Capability
+let  infinite_cap = struct {
+  mode    = 0b1,
+  nc      = to_bits(cap_nc_width, truisa_va - 1),
+  pac     = zeros(),
+  address = zeros(),
+}
 
 // Get the full cap bounds (base and top) as bit vectors.
 /* ===== TruISA helpers: pointer form decoding (ADR-0003 rev 8) ===== */
@@ -281,6 +292,17 @@ function slotBounds(addr : CapAddrBits, k : Int) -> (CapAddrBits, CapAddrBits) =
   let bound : CapAddrBits = base | zero_extend(ones(k));
   (base, bound)
 }
+
+// Kept from the blueprint for interface compatibility. In TruISA this is ALWAYS
+// false: ADR-0019 rev 5 made bare pointers cover only their own half-space, so
+// no pointer spans the whole address space. Callers must not rely on it ever
+// returning true -- it exists so ported code still compiles and so the concept
+// stays named rather than silently disappearing.
+val  decodedBoundsInfinite : (CapAddrInt, CapLenInt) -> bool
+function decodedBoundsInfinite(base, top) = false
+
+val  capBoundsInfinite : Capability -> bool
+function capBoundsInfinite(c) = false
 
 val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
 function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) = {
@@ -473,6 +495,21 @@ function unpackPerms(perms : BitPerms) -> (ArchPerms, bits(lvlbits), bits(cap_sd
 // so the length is bound - base + 1 (not bound - base). The old name `top`
 // came from CHERI, where it meant the EXCLUSIVE upper bound -- opposite
 // semantics, which is exactly how the missing +1 slipped in.
+// Smallest representable length >= len: the slot size 2^N_c that would cover an
+// object of this length starting at address 0. CHERI derived this from the
+// compressed encoding; TruISA takes it straight from minSlotCovering.
+val  getRepresentableLength : xlenbits -> xlenbits
+function getRepresentableLength(len : xlenbits) -> xlenbits =
+  match minSlotCovering(zeros(), zero_extend(len)) {
+    None()  => zeros(),                                  // no slot can cover it
+    Some(n) => zero_extend(ones(unsigned(n))) + 1,        // 2^N_c
+  }
+
+// Alignment mask implied by getRepresentableLength: 2^N_c - 1.
+val  getRepresentableAlignmentMask : xlenbits -> xlenbits
+function getRepresentableAlignmentMask(len : xlenbits) -> xlenbits =
+  getRepresentableLength(len) - 1
+
 function getCapLength(c : Capability) -> CapLenInt =
   match getCapBounds(c) {
     None() => 0,
