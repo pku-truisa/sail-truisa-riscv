@@ -415,25 +415,22 @@ function unpackPerms(perms : BitPerms) -> (ArchPerms, bits(lvlbits), bits(cap_sd
   (arch_perms, perms[CL], perms[SDP])
 }
 
+// Length of the pointed-to region. `bound` is the CLOSED-interval last byte,
+// so the length is bound - base + 1 (not bound - base). The old name `top`
+// came from CHERI, where it meant the EXCLUSIVE upper bound -- opposite
+// semantics, which is exactly how the missing +1 slipped in.
 function getCapLength(c : Capability) -> CapLenInt =
   match getCapBounds(c) {
     None() => 0,
-    Some(base, top) => {assert(top >= base); top - base},
+    Some(base, bound) => {assert(bound >= base); bound - base + 1},
   }
 
-// Return true if the given decoded bounds cover the entire address space.
-// Microarchitecturally, this should be the same as checking if the exponent
-// is max_exp.
-function decodedBoundsInfinite(base : CapAddrInt, top : CapLenInt) -> bool =
-  (base == 0) & (top >= 2 ^ xlen)
-
-// Return true if the given capability has infinite bounds, meaning
-// it can access any byte of the address space.
-function capBoundsInfinite(c: Capability) -> bool =
-  match getCapBounds(c) {
-    None() => false,
-    Some(base, top) => decodedBoundsInfinite(base, top),
-  }
+// NOTE(ADR-0019 rev 5): the "infinite bounds" concept is GONE. Bare pointers
+// now cover only their own half-space (N_p = VA-1), so there is no pointer
+// whose bounds span the whole address space. The former helpers
+// decodedBoundsInfinite / capBoundsInfinite were dead predicates anyway
+// (`top >= 2^xlen` can never hold when top comes from a 48-bit field) and have
+// been removed rather than fixed.
 
 // Return true if the range [addr, addr+size) is in the cap bounds.
 // The upper bound arithmetic is allowed to overflow, wrapping the address space.
@@ -464,7 +461,7 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   let max_top = 2 ^ xlen;
   match getCapBounds(cap) {
     None() => false,
-    Some(base, top) => ((a >= base) & ((a + size) <= min(top,max_top))) | decodedBoundsInfinite(base, top)
+    Some(base, top) => ((a >= base) & ((a + size) <= min(top,max_top)))
   }
 }
 
@@ -474,7 +471,7 @@ function anyByteInCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenI
   let a = unsigned(addr);
   match getCapBounds(cap) {
     None() => false,
-    Some(base, top) => ((a < top) & ((a + size) > base)) | decodedBoundsInfinite(base, top)
+    Some(base, top) => ((a < top) & ((a + size) > base))
   }
 }
 
