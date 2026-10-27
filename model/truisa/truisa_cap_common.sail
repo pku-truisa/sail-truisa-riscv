@@ -64,6 +64,10 @@ type CapPacBits   = bits(cap_pac_width)
 // PAC = 57 - VA gives 1 + 6 = 7 for EVERY profile, which is exactly ADR-0003
 // rev 12: the tag is bits 63-57 and its width does not vary across profiles.
 type CapTagBits   = bits(cap_mode_width + cap_nc_width)
+// Metadata = everything that is NOT the address: mode | N/C | PAC (16 bits on
+// Sv48). Same role as CHERI's 64-bit metadata word, only narrower -- TruISA
+// keeps it in the pointer's high bits instead of a separate word.
+type CapMetaBits  = bits(cap_mode_width + cap_nc_width + cap_pac_width)
 
 // XLEN+1 (33 or 65).
 type CapLenBits   = bits(cap_len_width)
@@ -111,12 +115,18 @@ function bitsToCap(tag : bool, cap_bits : CapBits) -> Capability = {
   }
 }
 
-// Encode a capability to compressed form. Only the metadata is returned since
-// the tag and address are directly available in `cap`.
-function capToMetadataBits(cap : Capability) -> bits(xlen) = {
-  // TruISA has no separate metadata word -- the pointer IS its own metadata.
-  capToBits(cap)
-}
+// The metadata half of a pointer: everything that is not the address, i.e.
+// mode | N/C | PAC (16 bits on Sv48). This is the TruISA counterpart of CHERI's
+// capToMetadataBits, which returns the high 64-bit word of a 128-bit
+// capability (what GCHI calls "the metadata, bits [CLEN-1:MXLEN]").
+//
+// TruISA has NO separate metadata word -- the metadata lives in the pointer's
+// high bits -- so this returns 16 bits, not a whole register. To get the full
+// pointer word use capToBits; to get only the form-deciding tag use
+// getCapTagBits (7 bits).
+val  capToMetadataBits : Capability -> CapMetaBits
+function capToMetadataBits(cap : Capability) -> CapMetaBits =
+  cap.mode @ cap.nc @ cap.pac
 
 // Zero permission capability.
 // TODO: We should be able to use bitsToCap(false, zeros()) but there
@@ -660,7 +670,7 @@ function capToString(cap : Capability) -> string = {
 
   // Print the raw metadata bits if they didn't decode to help debugging
   let raw_str = if bounds_malformed | perms_malformed | reserved_malformed then
-    " raw:" ^ bits_str(capToMetadataBits(cap))
+    " raw:" ^ bits_str(capToBits(cap))
   else
     "";
 
