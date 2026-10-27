@@ -20,14 +20,12 @@ union clause instruction = GCADDR : (regidx, regidx)
  *
  * gcbase rd, rs1
  *
- * Decode the base integer address from rs1's bounds and write the result
+ * Decode the base integer address from cs1's bounds and write the result
  * to rd.
  */
 
 function clause execute (GCBASE(rd, cs1)) = {
-  // getCapBoundsBits takes the raw 64-bit pointer (it must see the tag to
-  // tell the form apart), so rebuild it from the Capability view.
-  let capVal = capToBits(C(cs1));
+  let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
     Some(base, _) => base
@@ -46,9 +44,7 @@ function clause execute (GCBASE(rd, cs1)) = {
  */
 
 function clause execute (GCBOUND(rd, cs1)) = {
-  // getCapBoundsBits takes the raw 64-bit pointer (it must see the tag to
-  // tell the form apart), so rebuild it from the Capability view.
-  let capVal = capToBits(C(cs1));
+  let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
     Some(_, bound) => bound 

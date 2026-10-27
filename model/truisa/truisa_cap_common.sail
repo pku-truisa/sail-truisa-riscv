@@ -219,8 +219,11 @@ function getCapCentroID(p : CapAddrBits, n : bits(6)) -> CapAddrBits = {
        (ADR-0019 rev 5 dropping the "Len = 2^48 special case" concerns the
        Bare form, NOT N=48.)
 */
-val  getCapBoundsBits : xlenbits -> option((xlenbits, xlenbits))
-function getCapBoundsBits(p : xlenbits) -> option((xlenbits, xlenbits)) = {
+val  getCapBoundsBits : Capability -> option((xlenbits, xlenbits))
+function getCapBoundsBits(c : Capability) -> option((xlenbits, xlenbits)) = {
+  // Takes the Capability view, like CHERI's original. The raw 64-bit word
+  // is rebuilt here so the form test can see the tag.
+  let p : xlenbits = capToBits(c);
   let tag7 : CapTagBits = getCapTagBits(p);
   let low_mask : xlenbits = zero_extend(ones(truisa_va - 1));   // 2^(VA-1) - 1
 
