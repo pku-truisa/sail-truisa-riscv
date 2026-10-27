@@ -25,6 +25,10 @@ union clause instruction = GCADDR : (regidx, regidx)
  */
 
 function clause execute (GCBASE(rd, cs1)) = {
+  // TODO(G1): getCapBoundsBits needs the FULL 64-bit pointer to tell the
+  // form apart, but X() returns only the address (regval_from_reg =
+  // sign_extend(address) after ruling B). Use capToBits(C(cs1)) once
+  // capToBits exists.
   let capVal = X(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
@@ -44,6 +48,10 @@ function clause execute (GCBASE(rd, cs1)) = {
  */
 
 function clause execute (GCBOUND(rd, cs1)) = {
+  // TODO(G1): getCapBoundsBits needs the FULL 64-bit pointer to tell the
+  // form apart, but X() returns only the address (regval_from_reg =
+  // sign_extend(address) after ruling B). Use capToBits(C(cs1)) once
+  // capToBits exists.
   let capVal = X(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
@@ -75,16 +83,15 @@ union clause instruction = CADD : (regidx, regidx, regidx)
  * cadd rd, rs1, rs2
  * caddi rd, rs1, imm
  *
- * Increment the address field of the capability rs1  and write the
- * result to rd . The output capability is POISON if rs1 is illegal, 
- * the incremented address is outside rs1's
- * Representable Range or rs1's PAC is checked failed.
+ * cd gets the pointer cs1 with its address incremented by rs2 (or imm).
+ * If the source is poisoned, or the new address leaves cs1's slot, cd is
+ * set to the poison code.
  *
  * For CADD, the address is incremented by the value in rs2 .
  * For CADDI, the address is incremented by the immediate value imm.
  */
 function clause execute (CADD(cd, cs1, rs2)) = {
-  let cs1_val = X(cs1);
+  let cs1_val = C(cs1);
   let rs2_val = X(rs2);
 
   let newCap = incCapAddrChecked(cs1_val, rs2_val);
@@ -101,10 +108,9 @@ union clause instruction = CADDI : (regidx, regidx, bits(12))
  * cadd cd, cs1, rs2
  * caddi cd, cs1, imm
  *
- * Increment the address field of the capability cs1  and write the
- * result to cd . The tag bit of the output capability is 0 if cs1  did
- * not have its tag set to 1, the incremented address is outside cs1's
- * Representable Range or cs1  is sealed.
+ * cd gets the pointer cs1 with its address incremented by rs2 (or imm).
+ * If the source is poisoned, or the new address leaves cs1's slot, cd is
+ * set to the poison code.
  *
  * For CADD, the address is incremented by the value in rs2 .
  * For CADDI, the address is incremented by the immediate value imm.
@@ -126,37 +132,58 @@ union clause instruction = SCADDR : (regidx, regidx, regidx)
  *
  * scaddr cd, cs1, rs2
  *
- * Set the address field of capability cs1 to rs2 and write the output
- * capability to cd. The tag bit of the output capability is 0 if cs1 did
- * not have its tag set to 1, rs2 is outside the Representable Range of
- * cs1 or if cs1 is sealed.
+ * cd gets the pointer cs1 with its address replaced by rs2.
+ * If the source is poisoned, or the new address leaves cs1's slot, cd is
+ * set to the poison code.
  */
 function clause execute (SCADDR(cd, cs1, rs2)) = {
   C(cd) = setCapAddrChecked(C(cs1), X(rs2));
   RETIRE_SUCCESS
 }
 
-union clause instruction = SCBNDSI : (regidx, regidx, bits(1), bits(5))
+union clause instruction = SCBNDSI : (regidx, regidx, bits(9))
 /*!
  * insnref: scbnds_32bit
  * Capability set bounds
  *
  * scbnds cd, cs1, rs2
- * scbndsi cd, cs1, uimm
+ * scbndsi cd, cs1, imm
  *
  * Capability register cd  is set to capability register cs1  with the
- * base address of its bounds replaced with the value of cs1.address and
- * the length of its bounds set to rs2  (or imm). If the resulting
- * capability cannot be represented exactly then set cd.tag to 0. In all
- * cases, cd.tag is set to 0 if its bounds exceed cs1's bounds, cs1's tag
- * is 0  or cs1 is sealed.
- * SCBNDSI uses the s bit to scale the immediate by 4 places
- * immediate = ZeroExtend(s ? uimm<<4 : uimm)
+ * cd becomes an ALIGNED-SLOT pointer: address = cs1.address, and the slot
+ * exponent N_c is the smallest one whose slot covers the request length L
+ * (rs2 for SCBNDS; a 9-bit bit-remapped immediate for SCBNDSI).
+ * On failure -- L = 0, poisoned source, request not inside the source
+ * pointer interval, or no covering slot -- cd is set to the poison code
+ * (tag 0111111), NOT the CHERI behaviour of clearing a tag bit.
  */
-function clause execute (SCBNDSI(cd, cs1, s, uimm5)) = {
+// SCBNDSI immediate: pure bit remapping, no adder and no variable shifter
+// (spec/insns/scbnds.adoc "SCBNDSI 的立即数解码"):
+//   imm[8:0] = 0                    -> 4096                      (page)
+//   imm[8]   = 0, imm[7:0] != 0     -> imm[7:0]                  (1..255, bytes)
+//   imm[8]   = 1, imm[7:5] = 0      -> 256 | imm[3:0]<<4 | imm[4]<<3   (256..504, step 8)
+//   otherwise                       -> imm[7:0] << 4             (512..4080, step 16)
+// NOTE: the spec's third row is written as `256 | (imm[3:0] << 4) | (imm[4] << 3)`
+//       while its prose says "256-504, step 8"; those two do not agree
+//       (the formula tops out at 392). Implemented literally below; flagged
+//       for the architecture group.
+val  decode_scbndsi_imm : bits(9) -> xlenbits
+function decode_scbndsi_imm(imm : bits(9)) -> xlenbits = {
+  if imm == zeros() then
+    zero_extend(to_bits(12, 4096))
+  else if imm[8] == 0b0 then
+    zero_extend(imm[7 .. 0])
+  else if imm[7 .. 5] == 0b000 then
+    zero_extend(to_bits(12, 256)) +
+      (zero_extend(imm[3 .. 0]) << 4) +
+      (zero_extend(imm[4]) << 3)
+  else
+    zero_extend(imm[7 .. 0]) << 4
+}
+
+function clause execute (SCBNDSI(cd, cs1, imm)) = {
   let cs1_val = C(cs1);
-  let length : xlenbits =
-    if s == 0b1 then zero_extend(uimm5 @ 0b0000) else zero_extend(uimm5);
+  let length : xlenbits = decode_scbndsi_imm(imm);
   let newBase = cs1_val.address;
   let newTop : CapLenBits = zero_extend(newBase) + zero_extend(length);
   // (3) the source interval must contain the request
@@ -179,16 +206,15 @@ union clause instruction = SCBNDS : (regidx, regidx, regidx)
  * Capability set bounds
  *
  * scbnds cd, cs1, rs2
- * scbndsi cd, cs1, uimm
+ * scbndsi cd, cs1, imm
  *
  * Capability register cd  is set to capability register cs1  with the
- * base address of its bounds replaced with the value of cs1.address and
- * the length of its bounds set to rs2  (or imm). If the resulting
- * capability cannot be represented exactly then set cd.tag to 0. In all
- * cases, cd.tag is set to 0 if its bounds exceed cs1's bounds, cs1's tag
- * is 0  or cs1 is sealed.
- * SCBNDSI uses the s bit to scale the immediate by 4 places
- * immediate = ZeroExtend(s ? uimm<<4 : uimm)
+ * cd becomes an ALIGNED-SLOT pointer: address = cs1.address, and the slot
+ * exponent N_c is the smallest one whose slot covers the request length L
+ * (rs2 for SCBNDS; a 9-bit bit-remapped immediate for SCBNDSI).
+ * On failure -- L = 0, poisoned source, request not inside the source
+ * pointer interval, or no covering slot -- cd is set to the poison code
+ * (tag 0111111), NOT the CHERI behaviour of clearing a tag bit.
  */
 function clause execute (SCBNDS(cd, cs1, rs2)) = {
   let cs1_val = C(cs1);
@@ -292,8 +318,8 @@ mapping clause encdec = SCEQ(rd, cs1, cs2)                                      
 
 mapping clause encdec = CADDI(cd, cs1, imm12)                                 if cheri_registers_enabled()
   <-> imm12 : bits(12) @ encdec_reg(cs1) @ 0b010 @ encdec_reg(cd) @ 0b0011011 if cheri_registers_enabled()
-mapping clause encdec = SCBNDSI(cd, cs1, s, uimm5)                                                    if cheri_registers_enabled() & not(s == 0b1 & uimm5 <=_u 0b00001)
-  <-> 0b000001 @ s : bits(1) @ uimm5 : bits(5) @ encdec_reg(cs1) @ 0b101 @ encdec_reg(cd) @ 0b0010011 if cheri_registers_enabled() & not(s == 0b1 & uimm5 <=_u 0b00001)
+mapping clause encdec = SCBNDSI(cd, cs1, imm)                                    if cheri_registers_enabled()
+  <-> 0b111 @ imm : bits(9) @ encdec_reg(cs1) @ 0b101 @ encdec_reg(cd) @ 0b0010011 if cheri_registers_enabled()
 
 mapping clause assembly = SCADDR(cd, cs1, rs2)  <-> "scaddr"  ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ reg_name(rs2)
 mapping clause assembly = CADD(cd, cs1, rs2)    <-> "cadd"    ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ reg_name(rs2)
@@ -303,5 +329,4 @@ mapping clause assembly = SCEQ(rd, cs1, cs2)    <-> "sceq"    ^ spc() ^ reg_name
 
 mapping clause assembly = CADDI(cd, cs1, imm12) <-> "caddi"   ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ hex_bits_12(imm12)
 
-mapping clause assembly = SCBNDSI(cd, cs1, 0b0, uimm5) <-> "scbndsi" ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ hex_bits_12(0b0000000 @ uimm5)
-mapping clause assembly = SCBNDSI(cd, cs1, 0b1, uimm5) <-> "scbndsi" ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ hex_bits_12(0b000 @ uimm5 @ 0b0000)
+mapping clause assembly = SCBNDSI(cd, cs1, imm) <-> "scbndsi" ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ hex_bits_12(0b111 @ imm)
