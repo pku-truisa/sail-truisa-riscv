@@ -151,11 +151,19 @@ val  capToBits : Capability -> xlenbits
 function capToBits(c : Capability) -> xlenbits =
   c.mode @ c.nc @ c.pac @ c.address
 
-// The tag: the top CapTagBits (63-57) of a pointer. Every form decision hangs
+// The tag: the top (mode + N/C) bits of a pointer. Every form decision hangs
 // off this value. Named "Bits" to match the blueprint's getCapBoundsBits.
+// Bit positions are derived, never hard-coded: the tag ends at
+// ptr_width-1 and spans (mode + N/C) bits downwards.
 val  getCapTagBits : xlenbits -> CapTagBits
 function getCapTagBits(p : xlenbits) -> CapTagBits =
-  p[63 .. truisa_pac_width + truisa_va]
+  p[truisa_ptr_width - 1 .. truisa_ptr_width - cap_mode_width - cap_nc_width]
+
+// The N/C field: the bits just below mode. Split out because both formOf and
+// getCapBoundsBits need it, and duplicating the slice invites bit-position drift.
+val  getCapN : xlenbits -> bits(cap_nc_width)
+function getCapN(p : xlenbits) -> bits(cap_nc_width) =
+  p[truisa_ptr_width - 2 .. truisa_ptr_width - 1 - cap_nc_width]
 
 // Slot base of an aligned-slot pointer: SlotBase = p & ~(2^N - 1)
 // (docs/isa/04; ADR-0010 decision 4). Operates inside the address field only.
@@ -242,8 +250,8 @@ function formOf(p : xlenbits) -> CapPtrForm = {
   if      tag7 == 0b0111111 then FormPoisoned
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
-  else if p[63] == 0b0      then FormCentroID
-  else if unsigned(p[62 .. 57]) >= truisa_va then FormInvalid
+  else if p[truisa_ptr_width - 1] == 0b0 then FormCentroID
+  else if unsigned(getCapN(p)) >= truisa_va then FormInvalid
   else FormAligned
 }
 
@@ -272,7 +280,7 @@ function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) 
   let addr : CapAddrBits = p[47 .. 0];
   match formOf(p) {
     FormBare    => { let (b, e) = slotBounds(addr, truisa_va - 1); Some(b, e) },
-    FormAligned => { let (b, e) = slotBounds(addr, unsigned(p[62 .. 57])); Some(b, e) },
+    FormAligned => { let (b, e) = slotBounds(addr, unsigned(getCapN(p))); Some(b, e) },
     _           => None(),          // poisoned / invalid / CentroID (phase 1)
   }
 }
