@@ -113,19 +113,19 @@ struct Capability = {
 
 // Decode compressed capability to a more convenient struct.
 function bitsToCap(tag : bool, cap_bits : CapBits) -> Capability = {
-  // TruISA has NO compressed encoding: the 64-bit word IS the pointer, so
+  // TruISA has NO compressed encoding: the pointer word IS the capability, so
   // decoding is a plain field split.
-  // `tag` is CHERI's out-of-band validity bit; TruISA carries it in-band in
-  // bits 63-57, so this argument is IGNORED BY DESIGN (D-44 ruling 丙).
-  //   bit 63     mode
-  //   bits 62-57 N/C
-  //   bits 56-48 PAC
-  //   bits 47-0  address
+  // Bit positions are DERIVED from the width constants above -- switching the
+  // VA profile needs no edit here.
+  // `tag` is CHERI's out-of-band validity bit; TruISA carries it in-band, so
+  // this argument is IGNORED BY DESIGN (D-44 ruling 丙).
   struct {
-    mode    = cap_bits[63],
-    nc      = cap_bits[62 .. 57],
-    pac     = cap_bits[56 .. 48],
-    address = cap_bits[47 .. 0],
+    mode    = cap_bits[truisa_ptr_width - 1],
+    nc      = cap_bits[truisa_ptr_width - 2 .. truisa_ptr_width - 1 - truisa_nc_width],
+    // PAC can be zero-width (Sv57), where the slice would be ill-formed.
+    pac     = if truisa_pac_width == 0 then zeros()
+              else cap_bits[truisa_ptr_width - 2 - truisa_nc_width .. truisa_va],
+    address = cap_bits[truisa_va - 1 .. 0],
   }
 }
 
