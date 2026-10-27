@@ -16,15 +16,20 @@ let  cap_size = sizeof(cap_size)
 // Pointer layout (ADR-0003 rev 12), from the top bit down:
 //   bit 63        mode    truisa_mode_width = 1
 //   bits 62-57    N/C     truisa_nc_width   = 6
-//   bits 56-48    PAC     truisa_pac_width  = 57 - VA (computed below)
+//   bits 56-48    PAC     truisa_pac_width  = ptr - VA - mode - N/C (computed)
 //   bits 47-0     address truisa_va
-type truisa_va          : Int = 48               // Sv48; Sv39 -> 39, Sv57 -> 57
+// Every width below is derived from these four; no bit position is hard-coded.
+type truisa_ptr_width   : Int = xlen           // 64 on RV64 (TruISA targets RV64)
+let  truisa_ptr_width   = sizeof(truisa_ptr_width)
+type truisa_va          : Int = 48              // Sv48; Sv39 -> 39, Sv57 -> 57
 let  truisa_va          = sizeof(truisa_va)
 type truisa_mode_width  : Int = 1
 let  truisa_mode_width  = sizeof(truisa_mode_width)
 type truisa_nc_width    : Int = 6
 let  truisa_nc_width    = sizeof(truisa_nc_width)
-type truisa_pac_width   : Int = 57 - truisa_va   // Sv39 -> 18 | Sv48 -> 9 | Sv57 -> 0
+// PAC takes whatever is left between the tag and the address:
+//   Sv39 -> 64-39-7 = 18 | Sv48 -> 64-48-7 = 9 | Sv57 -> 64-57-7 = 0
+type truisa_pac_width   : Int = truisa_ptr_width - truisa_va - truisa_mode_width - truisa_nc_width
 let  truisa_pac_width   = sizeof(truisa_pac_width)
 
 type cap_addr_width : Int = truisa_va          // was xlen (CHERI); TruISA uses the VA width
