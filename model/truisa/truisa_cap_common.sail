@@ -147,30 +147,7 @@ val  capToBits : Capability -> xlenbits
 function capToBits(cap : Capability) -> xlenbits =
   cap.mode @ cap.nc @ cap.pac @ cap.address
 
-/* ===== The "C() view": pointers live in the integer register file =====
- * ADR-0017: TruISA has NO separate capability register file. So C() is nothing
- * more than bitsToCap/capToBits over X, exposed through the same four-way
- * overload that the blueprint uses (model/cheri/cheri_regs.sail:26). That is
- * what lets every instruction be written as C(cs1) / C(cd) = v exactly as
- * in the blueprint, without any of them knowing where the bits are kept.
- *
- * rX(r) already returns 0 for x0, so rC(0) is the all-zero capability
- * (null_cap) for free -- no special case needed here.
- *
- * ⚠️ This overload is mutually exclusive with the CHERI model's `overload C`.
- * A single Sail invocation must include model/truisa OR model/cheri, never both.
- */
-function rC(r : regno) -> Capability = bitsToCap(false, X(r))
-
-function wC (Regno(r) : regno, v : Capability) -> unit =
-  X(Regno(r)) = capToBits(v)
-
-function rC_bits(Regidx(i) : regidx) -> Capability = rC(Regno(unsigned(i)))
-
-function wC_bits(Regidx(i) : regidx, v : Capability) -> unit =
-  wC(Regno(unsigned(i)), v)
-
-overload C = {rC_bits, wC_bits, rC, wC}
+// The C() view (capability register accessors) lives in truisa_regs.sail.
 
 // The tag: the top (mode + N/C) bits of a pointer. Every form decision hangs
 // off this value. Named "Bits" to match the blueprint's getCapBoundsBits.
