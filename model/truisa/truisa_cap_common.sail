@@ -401,18 +401,19 @@ function poisonIf(cap, cond) =
 // Do not delete it as "dead code"; see the notice's "don't touch" list.
 val  minSlotExponent : (CapAddrBits, CapAddrBits) -> option(bits(cap_nc_width))
 function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits(cap_nc_width)) = {
-  if bound <_u addr then None()                      // empty request: no byte to cover
-  else {
-    // XOR at the address width first (both operands are CapAddrBits, so `^`
-    // resolves), then widen once -- widening each side separately leaves
-    // zero_extend without a target width, which is the same trap as before.
-    // bits(64), not xlenbits: widening to xlenbits requires proving 48 <= xlen,
-    // which is not provable while xlen is symbolic. 64 is the pointer width
-    // (truisa_ptr_width is a literal for the same reason).
-    let diff : bits(64) = zero_extend(addr ^ bound);
-    let slotExp : int = if diff == zeros() then 0 else 64 - count_leading_zeros(diff);
-    Some(to_bits(cap_nc_width, slotExp))
-  }
+  // TODO(model): the body is deferred. The natural implementation computes
+  //   slotExp = cap_addr_width - count_leading_zeros(addr ^ bound)
+  // and then needs to_bits(cap_nc_width, slotExp), which requires Sail to prove
+  // slotExp < 64. That is true (the XOR of two address-width values has at least
+  // 16 leading zeros, so slotExp <= 48) but not provable: the solver does not
+  // learn anything from the `diff == zeros()` branch, and truncate/slice/mask all
+  // need a bitvector rather than the int that count_leading_zeros returns.
+  //
+  // Nothing calls this yet -- SCBNDS/SCBNDSI take N directly (ADR-0028) and
+  // GCADDR/GCBOUND read the pointer's own N/C field. Only DSTR/DIDW will need it,
+  // and they are not implemented, so returning None (no such slot) keeps the
+  // model type-checking without pretending to answer.
+  None()
 }
 
 // Utility to get the cap bounds (base and top) as integers.
