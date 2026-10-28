@@ -377,10 +377,15 @@ function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits
 }
 
 // Utility to get the cap bounds (base and top) as integers.
-function getCapBounds(cap : Capability) -> option((CapAddrInt, CapLenInt)) =
+// Same endpoints as getCapBoundsBits, converted to Int so callers can subtract
+// and compare without bit-vector plumbing.
+// ⚠️ Both components live in the ADDRESS domain: the second one is `bound`, the
+// CLOSED-interval last byte, NOT an exclusive `top`. TruISA has no endpoint
+// outside the address space, so nothing here needs CapLenInt's extra bit.
+function getCapBounds(cap : Capability) -> option((CapAddrInt, CapAddrInt)) =
   match getCapBoundsBits(cap) {
-    None()          => None(),
-    Some(base, top) => Some(unsigned(base), unsigned(top))
+    None()        => None(),
+    Some(base, b) => Some(unsigned(base), unsigned(b))
   }
 
 /* An 'ideal' version of setCapBounds as described in paper. */
@@ -584,11 +589,14 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   if size == 0 then return false;
   if size > (2 ^ truisa_va) then return false;
 
+  // CLOSED interval: the last byte touched is a + size - 1, which must be <= bound.
+  // (size >= 1 was checked above, so size - 1 cannot underflow.) `a + size - 1`
+  // is computed in Int, so it cannot wrap: an over-long request simply exceeds
+  // bound and fails.
   let a = unsigned(addr);
-  let max_top = 2 ^ xlen;
   match getCapBounds(cap) {
-    None() => false,
-    Some(base, top) => ((a >= base) & ((a + size) <= min(top,max_top)))
+    None()          => false,
+    Some(base, bnd) => (a >= base) & ((a + size - 1) <= bnd)
   }
 }
 
@@ -598,17 +606,24 @@ function anyByteInCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenI
   let a = unsigned(addr);
   match getCapBounds(cap) {
     None() => false,
-    Some(base, top) => ((a < top) & ((a + size) > base))
+    Some(base, bnd) => ((a <= bnd) & ((a + size) > base))
   }
 }
 
 // Return true if the range [addr, addr+size) is in the cap bounds.
 // The upper bound arithmetic is full-width and isn't wrapped.
+// Same test as inCapBounds but WITHOUT the wrapping allowance -- used by SCBNDS
+// criterion (3) on the source interval. Closed interval, same reasoning.
+// Guard size >= 1 locally: the callers currently reject L = 0 themselves, but a
+// zero size here would make `size - 1` negative and pass almost everywhere.
 function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
-  let a = unsigned(addr);
-  match getCapBounds(cap) {
-    None() => false,
-    Some(base, top) => (a >= base) & ((a + size) <= top),
+  if size < 1 then false
+  else {
+    let a = unsigned(addr);
+    match getCapBounds(cap) {
+      None()          => false,
+      Some(base, bnd) => (a >= base) & ((a + size - 1) <= bnd),
+    }
   }
 }
 
@@ -714,7 +729,7 @@ function capBoundsEqual (c1 : Capability, c2 : Capability) -> bool =
   match (getCapBounds(c1), getCapBounds(c2)) {
     (None(), _) => false,
     (_, None()) => false,
-    (Some(base1, top1), Some(base2, top2)) => (base1 == base2) & (top1 == top2)
+    (Some(base1, bnd1), Some(base2, bnd2)) => (base1 == base2) & (bnd1 == bnd2)
   }
 
 function setCapAddr(c : Capability, addr : CapAddrBits) -> (bool, Capability) = {
@@ -741,7 +756,7 @@ function incCapAddrChecked(c : Capability, delta : CapAddrBits) -> Capability =
 function capToString(cap : Capability) -> string = {
   let (base_str, top_str, bounds_malformed) : (string, string, bool) = match getCapBoundsBits(cap) {
     None() => ("0 (malformed)", "0 (malformed)", true),
-    Some(base, top) => (bits_str(base), bits_str(zero_extend(cap_len_width + 3, top)), false)
+    Some(base, bnd) => (bits_str(base), bits_str(zero_extend(truisa_va, bnd)), false)
   };
 
   let len_str = bits_str(to_bits_unsafe(cap_len_width + 3, getCapLength(cap)));
