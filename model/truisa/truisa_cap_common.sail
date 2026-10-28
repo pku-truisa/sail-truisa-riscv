@@ -11,7 +11,7 @@
 //   bit 63        mode    truisa_mode_width = 1
 //   bits 62-57    N/C     truisa_nc_width   = 6
 //   bits 56-48    PAC     truisa_pac_width  = ptr - VA - mode - N/C (computed)
-//   bits 47-0     address truisa_va
+//   bits 47-0     address truisa_address_width
 // Every width below is derived from these four; no bit position is hard-coded.
 // ⚠️ LITERAL 64, not `xlen`. Three separate Sail limits converge here, and all
 // three are about "the value must be known at type-check time":
@@ -25,8 +25,8 @@
 // the honest encoding of that fact.
 type truisa_ptr_width   : Int = 64
 let  truisa_ptr_width   = sizeof(truisa_ptr_width)
-type truisa_va          : Int = 48              // Sv48; Sv39 -> 39, Sv57 -> 57
-let  truisa_va          = sizeof(truisa_va)
+type truisa_address_width : Int = 48    // Sv48; Sv39 -> 39, Sv57 -> 57
+let  truisa_address_width = sizeof(truisa_address_width)
 type truisa_mode_width  : Int = 1
 let  truisa_mode_width  = sizeof(truisa_mode_width)
 type truisa_nc_width    : Int = 6
@@ -37,7 +37,7 @@ let  truisa_nc_width    = sizeof(truisa_nc_width)
 // `bits(xlen - 55)` as "recursive types are forbidden", which is its generic
 // message for "I could not evaluate this width"; the type is not really recursive.
 // 9 == 64 (ptr) - 48 (VA) - 1 (mode) - 6 (N/C) for the Sv48 profile.
-// ⭐ Changing truisa_va REQUIRES updating this number. The derivation stays here
+// ⭐ Changing truisa_address_width REQUIRES updating this number. The derivation stays here
 // so the check is manual but possible.
 type truisa_pac_width   : Int = 9
 let  truisa_pac_width   = sizeof(truisa_pac_width)
@@ -54,7 +54,7 @@ let  truisa_pac_width   = sizeof(truisa_pac_width)
 type cap_size : Int = 8                   // TruISA: pointer is 64-bit (CHERI used xlen_bytes * 2)
 let  cap_size = sizeof(cap_size)
 
-type cap_addr_width : Int = truisa_va          // was xlen (CHERI); TruISA uses the VA width
+type cap_addr_width : Int = truisa_address_width          // was xlen (CHERI); TruISA uses the VA width
 let  cap_addr_width = sizeof(cap_addr_width)
 type cap_len_width : Int = cap_addr_width + 1
 let  cap_len_width = sizeof(cap_len_width)
@@ -126,8 +126,8 @@ function bitsToCap(tag : bool, cap_bits : CapBits) -> Capability = {
     nc      = cap_bits[truisa_ptr_width - 2 .. truisa_ptr_width - 1 - truisa_nc_width],
     // PAC can be zero-width (Sv57), where the slice would be ill-formed.
     pac     = if truisa_pac_width == 0 then zeros()
-              else cap_bits[truisa_ptr_width - 2 - truisa_nc_width .. truisa_va],
-    address = cap_bits[truisa_va - 1 .. 0],
+              else cap_bits[truisa_ptr_width - 2 - truisa_nc_width .. truisa_address_width],
+    address = cap_bits[truisa_address_width - 1 .. 0],
   }
 }
 
@@ -227,7 +227,7 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
   let base : CapAddrBits = getCapSlotBase(p, n);
   // N = 0 (no midline) and N = VA (whole-space slot, midline collides with the
   // bare pointer's) both yield the reserved value 0 -- ADR-0004 rev 7.
-  if (n == 0b000000) | (unsigned(n) == truisa_va) then zeros()
+  if (n == 0b000000) | (unsigned(n) == truisa_address_width) then zeros()
   else {
     // 2^(n-1) as (1 << n) >> 1: shifts of a non-negative amount only, so the
     // solver needs no assumption about n (and n = 0 gives 0 for free, which the
@@ -312,7 +312,7 @@ function getCapForm(ptr : CapBits) -> CapPtrForm = {
   if      tag7 == 0b0111111 then FormPoisoned
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
-  else if nc > truisa_va then FormInvalid              // both forms: N/C in 0..VA
+  else if nc > truisa_address_width then FormInvalid              // both forms: N/C in 0..VA
   else if tag7[6] == 0b1 then FormAligned
   else FormDescriptor                                  // phase 1 never gets here
 }
@@ -352,7 +352,7 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
   let ptr : CapBits = capToBits(cap);
   let addr : CapAddrBits = ptr[47 .. 0];
   match getCapForm(ptr) {
-    FormBare    => { let (base, bound) = slotBounds(addr, truisa_va); Some(base, bound) },
+    FormBare    => { let (base, bound) = slotBounds(addr, truisa_address_width); Some(base, bound) },
     FormAligned => { let (base, bound) = slotBounds(addr, unsigned(getCapN(ptr))); Some(base, bound) },
     _           => None(),          // poisoned / invalid / CentroID (phase 1)
   }
@@ -465,7 +465,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits, n : bits(cap_nc_w
   // The N >= VA branch is kept because a shift by the full width is undefined
   // behaviour in the RISC-V reading Sail models.
   let slotBaseBits : CapAddrBits =
-    if slotExp >= truisa_va then zeros()
+    if slotExp >= truisa_address_width then zeros()
     else (base >> slotExp) << slotExp;
   let slotBaseInt : int = unsigned(slotBaseBits);
   let slotEndInt  : int = slotBaseInt + pow2(slotExp) - 1;
@@ -500,7 +500,7 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   // --- pointer to 0 must poison instead (not implemented yet, G2).
   if addr == zeros() then return false;
   if size == 0 then return false;
-  if size > (2 ^ truisa_va) then return false;
+  if size > (2 ^ truisa_address_width) then return false;
 
   // CLOSED interval: the last byte touched is a + size - 1, which must be <= bound.
   // (size >= 1 was checked above, so size - 1 cannot underflow.) `a + size - 1`
