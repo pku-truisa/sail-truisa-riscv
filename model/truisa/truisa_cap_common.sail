@@ -225,7 +225,14 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
   // N = 0 (no midline) and N = VA (whole-space slot, midline collides with the
   // bare pointer's) both yield the reserved value 0 -- ADR-0004 rev 7.
   if (n == 0b000000) | (unsigned(n) == truisa_va) then zeros()
-  else base + zero_extend(0b1 @ zeros(unsigned(n) - 1))
+  else {
+    // 2^(n-1) as (1 << n) >> 1: shifts of a non-negative amount only, so the
+    // solver needs no assumption about n (and n = 0 gives 0 for free, which the
+    // guard above already excludes anyway). A 64-bit intermediate holds the
+    // 1 << 48 case before slicing back down to the address field.
+    let wide : bits(64) = to_bits(64, 1) << unsigned(n);
+    base + (wide[cap_addr_width - 1 .. 0] >> 1)
+  }
 }
 
 /* TODO (descriptor phase) -- `getCapCentroID` gives the CentroID representative.
