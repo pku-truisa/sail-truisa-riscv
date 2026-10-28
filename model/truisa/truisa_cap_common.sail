@@ -383,6 +383,11 @@ function poisonIf(cap, cond) =
 // empty (or wrapped) request. An over-large bound cannot occur -- the type is
 // CapAddrBits, so it is inside the address space by construction. (ADR-0026:
 // C = VA is legal, so the whole space is a valid slot.)
+// ⚠️ Currently has NO caller: SCBNDS / SCBNDSI take N directly now (ADR-0028),
+// and setCapBounds no longer searches for a covering slot. It is kept on
+// purpose -- DSTR / DIDW will need it, because a descriptor object is described
+// by (base, bound), not by a slot exponent, so C has to be derived here.
+// Do not delete it as "dead code"; see the notice's "don't touch" list.
 val  minSlotExponent : (CapAddrBits, CapAddrBits) -> option(bits(cap_nc_width))
 function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits(cap_nc_width)) = {
   if bound <_u addr then None()                      // empty request: no byte to cover
@@ -545,36 +550,11 @@ function unpackPerms(perms : BitPerms) -> (ArchPerms, bits(lvlbits), bits(cap_sd
   (arch_perms, perms[CL], perms[SDP])
 }
 
-// Smallest representable length >= len: the slot size 2^N_c that would cover an
-// object of this length starting at address 0. CHERI derived this from the
-// compressed encoding; TruISA takes it straight from minSlotExponent.
-val  getRepresentableLength : xlenbits -> xlenbits
-function getRepresentableLength(len : xlenbits) -> xlenbits =
-  if len == zeros() then zeros()                          // nothing to represent
-  else match minSlotExponent(zeros(), (len - 1)[truisa_va - 1 .. 0]) {
-    None()  => zeros(),                                   // no slot can cover it
-    Some(n) => zero_extend(ones(unsigned(n))) + 1,         // 2^N_c
-  }
-
-// Alignment mask implied by getRepresentableLength: 2^N_c - 1.
-val  getRepresentableAlignmentMask : xlenbits -> xlenbits
-function getRepresentableAlignmentMask(len : xlenbits) -> xlenbits =
-  getRepresentableLength(len) - 1
-
 // NOTE(ADR-0019 rev 7 + ADR-0026): a bare pointer now covers the WHOLE
 // address space (K = VA, SlotBase = 0, bound = 2^VA - 1), so Len = 2^VA for
 // it. The formula below still needs no special case -- base = 0 and
 // bound = 2^VA - 1 make it fall out. (The old premise "no pointer spans the
 // whole space" is withdrawn.)
-// Length of the pointed-to region. `bound` is the CLOSED-interval last byte,
-// so the length is bound - base + 1 (not bound - base). The old name `top`
-// came from CHERI, where it meant the EXCLUSIVE upper bound -- opposite
-// semantics, which is exactly how the missing +1 slipped in.
-function getCapLength(cap : Capability) -> CapLenInt =
-  match getCapBounds(c) {
-    None() => 0,
-    Some(base, bound) => {assert(bound >= base); bound - base + 1},
-  }
 
 // Return true if the range [addr, addr+size) is in the cap bounds.
 // The upper bound arithmetic is allowed to overflow, wrapping the address space.
@@ -622,69 +602,11 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   }
 }
 
-// Return true if any byte of the access is within the cap bounds
-// Used for certain CBO instructions
-// "Does ANY byte of [addr, addr+size) lie inside the bounds?" -- the predicate
-// used where over-approximation is the safe answer (it is a MAY, not a MUST).
-// Guard size >= 1 locally: with size = 0 the second conjunct degenerates to
-// `addrInt > base`, which is true for most addresses, so a zero-length request
-// would claim to touch the object.
-function anyByteInCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
-  if size < 1 then false
-  else {
-    let addrInt = unsigned(addr);
-    match getCapBounds(cap) {
-      None()            => false,
-      Some(base, bound) => ((addrInt <= bound) & ((addrInt + size) > base)),
-    }
-  }
-}
-
-// Return true if the range [addr, addr+size) is in the cap bounds.
-// The upper bound arithmetic is full-width and isn't wrapped.
-// Same test as inCapBounds but WITHOUT the wrapping allowance -- used by SCBNDS
-// criterion (3) on the source interval. Closed interval, same reasoning.
-// Guard size >= 1 locally: the callers currently reject L = 0 themselves, but a
-// zero size here would make `size - 1` negative and pass almost everywhere.
-function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
-  if size < 1 then false
-  else {
-    let addrInt = unsigned(addr);
-    match getCapBounds(cap) {
-      None()          => false,
-      Some(base, bound) => (addrInt >= base) & ((addrInt + size - 1) <= bound),
-    }
-  }
-}
-
 function capReservedValid(cap : Capability) -> bool =
   (cap.reserved_0 == zeros()) & (cap.reserved_1 == zeros())
 
 function capTaggedAndReservedValid(cap : Capability) -> bool =
   cap.tag & capReservedValid(cap)
-
-// Return true if c0's bounds and permissions are a subset of c1's.
-function capIsSubset(c0 : Capability, c1 : Capability) -> bool = {
-  let bounds_subset : bool = match (getCapBounds(c0), getCapBounds(c1)) {
-    (None(), _) => false,
-    (_, None()) => false,
-    (Some(c0_base, c0_top), Some(c1_base, c1_top)) =>
-      (c0_base >= c1_base) & (c0_top <= c1_top)
-  };
-  let perms_subset : bool = match (getArchPerms(c0), getArchPerms(c1)) {
-      (None(), _) => false,
-      (_, None()) => false,
-      (Some(c0_arch_perms), Some(c1_arch_perms)) => {
-        let c0_perms_packed = packPerms(c0_arch_perms, c0.cl, c0.sd_perms).bits;
-        let c1_perms_packed = packPerms(c1_arch_perms, c1.cl, c1.sd_perms).bits;
-        (c0_perms_packed & c1_perms_packed) == c0_perms_packed;
-      }
-  };
-  let level_subset = c0.cl <=_u c1.cl;
-  // Not a subset if reserved bits are set in either cap
-  let reserved_valid = capReservedValid(c0) & capReservedValid(c1);
-  bounds_subset & perms_subset & level_subset & reserved_valid;
-}
 
 function capBoundsEqual (c1 : Capability, c2 : Capability) -> bool =
   match (getCapBounds(c1), getCapBounds(c2)) {
