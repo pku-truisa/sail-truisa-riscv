@@ -175,7 +175,7 @@ function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
 // RIGHT point m is the canonical representative (ADR-0004 rev 4: the left
 // point degenerates when l = 0). This function returns that canonical point.
 // NOTE: computes the address only; `N` is taken from the pointer's N/C field
-//       by the caller (see getCapBoundsBits for the valid range 0..VA-1).
+//       by the caller (see getCapBoundsBits for the valid range 0..VA).
 //
 // ⛔ The 48-bit point m MUST NOT be used to index the descriptor table. Keys
 //    are always (C, S): a lone point m also names the slot (ctz(m)+1, ...), so
@@ -198,7 +198,9 @@ function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
 val  getCapCentroID : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
 function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
   let base : CapAddrBits = getCapSlotBase(p, n);
-  if n == 0b000000 then zeros()          // reserved value, NOT base -- see above
+  // N = 0 (no midline) and N = VA (whole-space slot, midline collides with the
+  // bare pointer's) both yield the reserved value 0 -- ADR-0004 rev 7.
+  if (n == 0b000000) | (unsigned(n) == truisa_va) then zeros()
   else base + zero_extend(0b1 @ zeros(unsigned(n) - 1))
 }
 
@@ -207,7 +209,7 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
    SlotBase | (2^N - 1) respectively. It is factored out because the descriptor
    phase (DSTR / DIDW / DGU / DFENCE) needs the CentroID in several places --
    keep this single definition, do not inline it. Its validity domain must
-   follow the same N range as getCapSlotBase (0..VA-1).
+   follow the same N range as getCapSlotBase (0..VA).
    ⚠️ N = 0 is a VALID input but yields the reserved value 0, so the descriptor
    phase must treat cid == 0 as a MISS everywhere (DSTR / DCLR / DIDW) -- never
    as "the entry at address 0". */
@@ -217,24 +219,29 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
    (ADR-0018 rev 7), so bound = base + 2^N - 1 = base | (2^N - 1).
 
    Forms (ADR-0003 rev 8, three-step test):
-     0000000  Bare low   -> (0, 2^(VA-1) - 1)
-     1111111  Bare high  -> (-2^(VA-1), -1)              [sign-extended]
+     0000000  Bare low   -> (0, 2^VA - 1)        [whole address space, K = VA]
+     1111111  Bare high  -> (0, 2^VA - 1)        [same: bit47 no longer matters]
      0111111  poisoned   -> None()
      1xxxxxx  Aligned    -> (SlotBase(p, N), SlotBase | (2^N - 1))
      0xxxxxx  CentroID   -> None()   (descriptor form not supported in phase 1)
 
-   U1: addresses/bounds are sign-extended to XLEN, matching GCADDR
-       (ADR-0023: sign_extend(rs1[47:0])) -- so the high half is negative.
+   U1: the endpoints are the 48-bit FIELD values, ZERO-extended by the
+       projection instructions (ADR-0019 rev 8; ADR-0023 decision 1). They are
+       NOT canonical VA: a canonical address sign-extends bit VA-1 instead, so
+       on the high side GC* gives 0x0000_8000_... while the canonical form is
+       0xFFFF_8000_.... Never feed a GC* result to a load/store or to a CSR
+       that needs a canonical address -- normalise in software (slli+srai).
    U2: poisoned pointer -> None(), NOT a fabricated value.
    U3 (GC-3): an illegal code point yields None(), and None() is NOT a trap.
        Two layers: the data path raises (TYPE, CAUSE = 3); the projection
        instructions (GCBASE/GCBOUND/GCADDR/CSUB/SCEQ) never trap. spec/ch07
        rewords "no failure track" to "does not raise a trap".
-   U4 (GC-4): N must be in 0..VA-1 (ADR-0005 dec 6). N = VA is ILLEGAL: an
-       N=48 aligned pointer covers exactly the whole Bare region, so signing
-       it would mint a legitimate, signable full-range pointer.
-       (ADR-0019 rev 5 dropping the "Len = 2^48 special case" concerns the
-       Bare form, NOT N=48.)
+   U4 (GC-4): N must be in 0..VA (ADR-0026 decision 1; ADR-0003 rev 22).
+       N = VA is LEGAL -- it is the whole-address-space slot. It is NOT
+       excluded on purpose: excluding it would let user code mint a full-range
+       pointer with a single `li`, so the gate is the OS issuing policy, not
+       validNC (ADR-0026 decisions 5-6). The older argument ("signing an N=48
+       slot would mint a signable full-range pointer") is WITHDRAWN.
 */
 /* ===== TruISA pointer form: the ONE place that decides what a pointer is =====
  * ADR-0003 rev 12. Every caller that needs to know "what kind of pointer is
@@ -267,7 +274,7 @@ function getCapForm(p : xlenbits) -> CapPtrForm = {
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
   else if p[truisa_ptr_width - 1] == 0b0 then FormCentroID
-  else if unsigned(getCapN(p)) >= truisa_va then FormInvalid
+  else if unsigned(getCapN(p)) > truisa_va then FormInvalid
   else FormAligned
 }
 
@@ -283,8 +290,9 @@ function getCapForm(p : xlenbits) -> CapPtrForm = {
 // NOT covered here (deliberately, each is a DIFFERENT state):
 //   - poisoned (bits 63-57 = 0111111): a defined state, not malformed
 //   - CentroID: unsupported in phase 1, not malformed
-//   - bare whose bit47 disagrees with bits 63-57: ADR ruling says COMPUTE
-//     ANYWAY, taking the half from bit 47, so it is not malformed either
+//   - bare whose bit47 disagrees with bits 63-57: still NOT malformed. A bare
+//     pointer's bounds are the whole address space (ADR-0019 rev 7), so bit47
+//     no longer selects a half and nothing depends on it.
 val  boundsMalformed : Capability -> bool
 function boundsMalformed(cap : Capability) -> bool =
   getCapForm(capToBits(cap)) == FormInvalid
@@ -302,18 +310,18 @@ val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
 function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) = {
   // Returns the endpoints in the ADDRESS domain (48 bits); the instruction
   // sign-extends them to XLEN itself (spec/insns/gcbase.adoc and gcbound.adoc
-  // both wrap the result in sign_extend_48).
+  // both wrap the result in zero_extend_48).
   //
   // Bare and Aligned are UNIFIED into one formula, following the spec:
   //   let K = (form == bare) ? VA - 1 : N(cs1);
-  // so a bare pointer is simply a slot with K = VA-1 (one half-space).
+  // so a bare pointer is simply a slot with K = VA (the whole address space).
   //
   // The form decision itself lives in getCapForm(); this function only maps a
   // usable form to endpoints.
   let p : xlenbits = capToBits(c);
   let addr : CapAddrBits = p[47 .. 0];
   match getCapForm(p) {
-    FormBare    => { let (b, e) = slotBounds(addr, truisa_va - 1); Some(b, e) },
+    FormBare    => { let (b, e) = slotBounds(addr, truisa_va); Some(b, e) },
     FormAligned => { let (b, e) = slotBounds(addr, unsigned(getCapN(p))); Some(b, e) },
     _           => None(),          // poisoned / invalid / CentroID (phase 1)
   }
@@ -334,16 +342,17 @@ function poisonIf(cap, cond) =
     }
   } else cap
 
-// Smallest slot exponent N (0 .. VA-1) whose slot covers [addr, top).
+// Smallest slot exponent N (0 .. VA) whose slot covers [addr, top).
 // `top` is the EXCLUSIVE upper bound (i.e. addr + L), matching CHERI's
 // setCapBounds(cap, base, top) convention.
 //   N_c = min{ N : SlotBase(addr,N) + 2^N >= top }
-// None() if no such N exists (L too large, or the request crosses the half).
+// None() if no such N exists (L too large; crossing the VA boundary is no
+// longer a failure, since the slot can be the whole address space).
 val  minSlotCovering : (CapAddrBits, CapLenBits) -> option(bits(cap_nc_width))
 function minSlotCovering(addr : CapAddrBits, top : CapLenBits) -> option(bits(cap_nc_width)) = {
   var found : bool = false;
   var n : Int = 0;
-  while (n < truisa_va) & not(found) do {
+  while (n <= truisa_va) & not(found) do {
     let base : CapAddrBits = getCapSlotBase(addr, to_bits(cap_nc_width, n));
     // slot end (exclusive) = base + 2^n = base + (2^n - 1) + 1
     let end : CapLenBits = zero_extend(base) + zero_extend(ones(n)) + 1;
@@ -504,10 +513,11 @@ val  getRepresentableAlignmentMask : xlenbits -> xlenbits
 function getRepresentableAlignmentMask(len : xlenbits) -> xlenbits =
   getRepresentableLength(len) - 1
 
-// NOTE(ADR-0019 rev 5): bare pointers cover only their own half-space
-// (N_p = VA-1), so NO pointer spans the whole address space. That is why the
-// length formula below needs no special case for "infinite" bounds -- the
-// concept does not exist in TruISA.
+// NOTE(ADR-0019 rev 7 + ADR-0026): a bare pointer now covers the WHOLE
+// address space (K = VA, SlotBase = 0, bound = 2^VA - 1), so Len = 2^VA for
+// it. The formula below still needs no special case -- base = 0 and
+// bound = 2^VA - 1 make it fall out. (The old premise "no pointer spans the
+// whole space" is withdrawn.)
 function getCapLength(c : Capability) -> CapLenInt =
   match getCapBounds(c) {
     None() => 0,

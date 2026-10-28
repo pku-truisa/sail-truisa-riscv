@@ -28,7 +28,7 @@ function clause execute (GCBASE(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(base, _) => sign_extend(base)
+    Some(base, _) => zero_extend(base)
   };
   RETIRE_SUCCESS
 }
@@ -48,7 +48,7 @@ function clause execute (GCBOUND(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(_, bound) => sign_extend(bound)
+    Some(_, bound) => zero_extend(bound)
   };
   RETIRE_SUCCESS
 }
@@ -64,7 +64,7 @@ function clause execute (GCBOUND(rd, cs1)) = {
  * yields its real address (only bits 47-0 are read).
  */
 function clause execute (GCADDR(rd, cs1)) = {
-  X(rd) = sign_extend(C(cs1).address);
+  X(rd) = zero_extend(C(cs1).address);
   RETIRE_SUCCESS
 }
 
