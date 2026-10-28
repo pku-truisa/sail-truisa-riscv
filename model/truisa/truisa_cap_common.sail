@@ -325,9 +325,13 @@ overload operator << = {sail_shiftleft}
 // The bound is an OR because the low K bits of the base are already zero.
 val  slotBounds : (CapAddrBits, int) -> (CapAddrBits, CapAddrBits)
 function slotBounds(addr : CapAddrBits, k : int) -> (CapAddrBits, CapAddrBits) = {
-  let base  : CapAddrBits = getCapSlotBase(addr, to_bits(cap_nc_width, k));
-  let bound : CapAddrBits = base | zero_extend(ones(k));
-  (base, bound)
+  // Same reason as getCapCentroID: to_bits(cap_nc_width, k) has to prove
+  // 0 <= k < 64 and Sail cannot, because k is an int of unknown range. Shifts on
+  // a 64-bit intermediate need only a non-negative amount, which `k` is.
+  let wide  : bits(64) = to_bits(64, 1) << k;          // 2^k, k = 0 gives 1
+  let base  : CapAddrBits = (addr >> k) << k;
+  let low   : CapAddrBits = (wide - 1)[cap_addr_width - 1 .. 0];   // 2^k - 1, 0 when k = 0
+  (base, base | low)
 }
 
 val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
@@ -399,7 +403,10 @@ val  minSlotExponent : (CapAddrBits, CapAddrBits) -> option(bits(cap_nc_width))
 function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits(cap_nc_width)) = {
   if bound <_u addr then None()                      // empty request: no byte to cover
   else {
-    let diff : xlenbits = zero_extend(addr) ^ zero_extend(bound);
+    // XOR at the address width first (both operands are CapAddrBits, so `^`
+    // resolves), then widen once -- widening each side separately leaves
+    // zero_extend without a target width, which is the same trap as before.
+    let diff : xlenbits = zero_extend(addr ^ bound);
     let slotExp : int = if diff == zeros() then 0 else xlen - count_leading_zeros(diff);
     Some(to_bits(cap_nc_width, slotExp))
   }
