@@ -184,15 +184,13 @@ function getCapN(ptr : CapBits) -> bits(cap_nc_width) =
 // (docs/isa/04; ADR-0010 decision 4). Operates inside the address field only.
 val  getCapSlotBase : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
 function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
-  // ⚠️ Two Sail traps here:
-  //   1) `~` is boolean negation (not_bool), NOT bit-wise complement. There is no
-  //      `overload operator ~` anywhere in either model, so `~v` on a bitvector
-  //      cannot resolve. Bit complement is not_vec(), but zero_extend() then has
-  //      no target width to solve for.
-  //   2) So compute the mask arithmetically instead: ~(2^n - 1) inside a
-  //      cap_addr_width-wide field is simply 2^VA - 2^n.
-  let mask : CapAddrBits = to_bits(cap_addr_width, pow2(cap_addr_width) - pow2(unsigned(n)));
-  p & mask
+  // Clearing the low n bits is a shift pair, which is how the blueprint does all
+  // of its bit surgery (cheri_cap_common.sail:234 a_mid = truncate(a >> E, ...)).
+  // ⛔ Not `p & ~(2^n - 1)`: that needs zero_extend(bits(n)) to be widened to
+  // CapAddrBits, and Sail has no width to aim at before `~` is resolved, so `~`
+  // only ever sees not_bool. Shifting never has that problem -- the operand
+  // stays CapAddrBits and only the shift amount is an int.
+  (p >> unsigned(n)) << unsigned(n)
 }
 
 // CentroID canonical representative point: m = SlotBase + 2^(N-1)  (ADR-0004)
@@ -310,6 +308,11 @@ function getCapForm(ptr : CapBits) -> CapPtrForm = {
 }
 
 // Execution tier (ExecTier / tierOf / bareBaseAllowed) lives in truisa_addr_checks.sail.
+
+// Shift operators, exactly as the blueprint declares them
+// (cheri_cap_common.sail:627-628). Needed by getCapSlotBase and slotBounds.
+overload operator >> = {sail_shiftright}
+overload operator << = {sail_shiftleft}
 
 // Slot endpoints for exponent K: [slot_base(addr,K), slot_base(addr,K)+2^K-1].
 // The bound is an OR because the low K bits of the base are already zero.
