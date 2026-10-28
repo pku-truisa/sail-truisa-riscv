@@ -342,33 +342,35 @@ function poisonIf(cap, cond) =
     }
   } else cap
 
-// Smallest slot exponent C (0 .. VA) whose aligned slot covers [addr, top).
-// `top` is the EXCLUSIVE upper bound (addr + L), matching setCapBounds(base, top).
+// Smallest slot exponent C (0 .. VA) whose aligned slot covers [addr, bound].
+// `bound` is the CLOSED-interval last byte of the REQUEST (same convention as
+// getCapBoundsBits' second component), so callers that hold a length pass
+// base + L - 1 -- no exclusive upper bound and no subtraction in here.
 //
-// ⭐ CLOSED FORM -- no loop, no search. A 2^C slot is aligned, so [addr, top)
-// fits iff addr and (top-1) fall in the SAME 2^C-aligned block, i.e.
-//     addr >> C == (top-1) >> C     <=>     addr ^ (top-1) < 2^C
+// ⭐ CLOSED FORM -- no loop, no search. A 2^C slot is aligned, so the request
+// fits iff addr and bound fall in the SAME 2^C-aligned block:
+//     addr >> C == bound >> C     <=>     addr ^ bound < 2^C
 // so the smallest such C is exactly the bit length of the XOR:
-//     C = bit_length(addr ^ (top-1))          bit_length(0) = 0
-// That is one XOR plus one CLZ (XLEN - count_leading_zeros), which is what a
-// DGU can do in a single cycle. Do NOT reintroduce an n = n + 1 search: the
-// enumerative form is only readable, never synthesizable at speed.
+//     C = bit_length(addr ^ bound)            bit_length(0) = 0
+// One XOR plus one CLZ (XLEN - count_leading_zeros) -- single cycle in a DGU.
+// Do NOT reintroduce an n = n + 1 search: the enumerative form is readable but
+// not synthesizable at speed.
 //
 // Examples (VA = 48):
-//   addr 0x1000, top 0x1010 -> last 0x100F, xor 0x000F -> C = 4   (16B slot)
-//   addr 0x1009, top 0x1011 -> last 0x1010, xor 0x0019 -> C = 5   (32B slot)
-//   addr X,      top X+1    -> last X,      xor 0      -> C = 0   (1B slot)
-//   addr 0,      top 2^VA   -> last 2^VA-1, xor all 1s -> C = VA  (whole space)
+//   addr 0x1000, bound 0x100F -> xor 0x000F -> C = 4    (16B slot)
+//   addr 0x1009, bound 0x1010 -> xor 0x0019 -> C = 5    (32B slot, unaligned start)
+//   addr X,      bound X      -> xor 0      -> C = 0    (1B slot)
+//   addr 0,      bound 2^VA-1 -> xor all 1s -> C = VA   (whole address space)
 //
-// ADR-0026: the whole address space is a legal slot (C = VA), so the only
-// failures are an empty request and one that leaves the address space.
-val  minSlotCovering : (CapAddrBits, CapLenBits) -> option(bits(cap_nc_width))
-function minSlotCovering(addr : CapAddrBits, top : CapLenBits) -> option(bits(cap_nc_width)) = {
-  if top <= zero_extend(addr) then None()            // L = 0 (or wrapped): no byte to cover
-  else if top > (2 ^ truisa_va) then None()          // request leaves the address space
+// Only ONE failure is possible here: bound < addr, i.e. the caller asked for an
+// empty (or wrapped) request. An over-large bound cannot occur -- the type is
+// CapAddrBits, so it is inside the address space by construction. (ADR-0026:
+// C = VA is legal, so the whole space is a valid slot.)
+val  minSlotExponent : (CapAddrBits, CapAddrBits) -> option(bits(cap_nc_width))
+function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits(cap_nc_width)) = {
+  if bound <_u addr then None()                      // empty request: no byte to cover
   else {
-    let last : xlenbits = top - 1;                   // closed-interval last byte
-    let diff : xlenbits = zero_extend(addr) ^ last;  // bits above the block boundary
+    let diff : xlenbits = zero_extend(addr) ^ zero_extend(bound);
     let c : Int = if diff == zeros() then 0 else xlen - count_leading_zeros(diff);
     Some(to_bits(cap_nc_width, c))
   }
@@ -395,14 +397,23 @@ function setCapBounds(cap : Capability, base : CapAddrBits, top : CapLenBits) ->
   //
   // TODO(PAC): this leaves `pac` zero. Signing is done by the instruction
   // (ADR-0005), whose operator is not implemented yet.
-  match minSlotCovering(base, top) {
-    None()  => (false, cap),
-    Some(n) => (true, struct {
-      mode    = 0b1,
-      nc      = n,
-      pac     = zeros(),
-      address = base,
-    })
+  // `top` stays EXCLUSIVE at this boundary because L = 0 has to be rejected
+  // before subtracting 1 (base + 0 - 1 would wrap). Below, the leaf operator
+  // takes the CLOSED bound, so the single exclusive->closed conversion in the
+  // whole model happens right here.
+  if top <= zero_extend(base) then (false, cap)
+  else if top > (2 ^ truisa_va) then (false, cap)
+  else {
+    let bound : CapAddrBits = (top - 1)[truisa_va - 1 .. 0];
+    match minSlotExponent(base, bound) {
+      None()  => (false, cap),
+      Some(n) => (true, struct {
+        mode    = 0b1,
+        nc      = n,
+        pac     = zeros(),
+        address = base,
+      })
+    }
   }
 }
 
@@ -507,18 +518,15 @@ function unpackPerms(perms : BitPerms) -> (ArchPerms, bits(lvlbits), bits(cap_sd
   (arch_perms, perms[CL], perms[SDP])
 }
 
-// Length of the pointed-to region. `bound` is the CLOSED-interval last byte,
-// so the length is bound - base + 1 (not bound - base). The old name `top`
-// came from CHERI, where it meant the EXCLUSIVE upper bound -- opposite
-// semantics, which is exactly how the missing +1 slipped in.
 // Smallest representable length >= len: the slot size 2^N_c that would cover an
 // object of this length starting at address 0. CHERI derived this from the
-// compressed encoding; TruISA takes it straight from minSlotCovering.
+// compressed encoding; TruISA takes it straight from minSlotExponent.
 val  getRepresentableLength : xlenbits -> xlenbits
 function getRepresentableLength(len : xlenbits) -> xlenbits =
-  match minSlotCovering(zeros(), zero_extend(len)) {
-    None()  => zeros(),                                  // no slot can cover it
-    Some(n) => zero_extend(ones(unsigned(n))) + 1,        // 2^N_c
+  if len == zeros() then zeros()                          // nothing to represent
+  else match minSlotExponent(zeros(), (len - 1)[truisa_va - 1 .. 0]) {
+    None()  => zeros(),                                   // no slot can cover it
+    Some(n) => zero_extend(ones(unsigned(n))) + 1,         // 2^N_c
   }
 
 // Alignment mask implied by getRepresentableLength: 2^N_c - 1.
@@ -531,6 +539,10 @@ function getRepresentableAlignmentMask(len : xlenbits) -> xlenbits =
 // it. The formula below still needs no special case -- base = 0 and
 // bound = 2^VA - 1 make it fall out. (The old premise "no pointer spans the
 // whole space" is withdrawn.)
+// Length of the pointed-to region. `bound` is the CLOSED-interval last byte,
+// so the length is bound - base + 1 (not bound - base). The old name `top`
+// came from CHERI, where it meant the EXCLUSIVE upper bound -- opposite
+// semantics, which is exactly how the missing +1 slipped in.
 function getCapLength(c : Capability) -> CapLenInt =
   match getCapBounds(c) {
     None() => 0,
