@@ -69,6 +69,42 @@ corresponding elements vertically aligned.
 
 ## Implementation
 
+### Fork rule: TruISA never links a `cheri_*` file
+
+TruISA is a **fork** of the CHERI model, not an extension layered on top of it.
+A single shared source file is enough to make the fork unverifiable: at that
+point neither model can be checked on its own.
+
+1. **A build of `model/truisa/` must not include any `model/cheri/*.sail`.**
+   Not even "just for the types". If something is needed, it gets its own copy.
+
+2. **Need something a `cheri_*` file has? Copy it, rename it, then edit it.**
+   `cheri_X.sail` -> `truisa_X.sail`, keeping the original block order so the
+   two files can be diffed block by block. Mark every change with a
+   `// TRUISA DELTA:` line naming the ADR that forces it.
+
+3. **Keep CHERI's file split.** The split is load-bearing, not cosmetic:
+   - `bits()` / `range()` / `Int` types  -> `*_cap_common.sail`
+   - `enum` / `struct` (abstract)        -> `*_types.sail`
+   - the one exception is `Capability`, which is a struct but stays in
+     `*_cap_common.sail` because it *is* the pointer geometry.
+   Do not merge two CHERI files into one TruISA file, and do not move a block
+   to another file "because it fits better there".
+
+4. **An upstream `riscv_*` / `prelude_*` file that already does the right thing
+   is used as-is** -- it gets no `truisa_*` twin. (Example:
+   `prelude_mem_metadata.sail` is already the no-metadata version TruISA needs.)
+
+5. **A genuinely new file -- one with no CHERI counterpart -- needs a decision
+   first**, recorded in an ADR or in a notice to the architecture group. Never
+   as a side effect of a refactor.
+
+6. **When in doubt, read the CHERI file before claiming what it contains.**
+   File names do not predict contents: `cheri_prelude.sail` holds tag
+   callbacks, while the capability widths live in `cheri_cap_common.sail`. A
+   "file responsibility table" that is inferred from names has already produced
+   one wrong refactor.
+
 ### Identifier naming (TruISA addition)
 
 - **No bare single letters**, unless the letter is a symbol the specification
