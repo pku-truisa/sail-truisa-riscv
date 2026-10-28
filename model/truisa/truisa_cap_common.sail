@@ -146,22 +146,22 @@ let null_cap : Capability = struct {
 // value out of a Capability. Needed wherever a function takes `xlenbits`
 // (e.g. getCapBoundsBits) but the caller holds a Capability (from C()).
 val  capToBits : Capability -> xlenbits
-function capToBits(c : Capability) -> xlenbits =
-  c.mode @ c.nc @ c.pac @ c.address
+function capToBits(cap : Capability) -> xlenbits =
+  cap.mode @ cap.nc @ cap.pac @ cap.address
 
 // The tag: the top (mode + N/C) bits of a pointer. Every form decision hangs
 // off this value. Named "Bits" to match the blueprint's getCapBoundsBits.
 // Bit positions are derived, never hard-coded: the tag ends at
 // ptr_width-1 and spans (mode + N/C) bits downwards.
 val  getCapTagBits : xlenbits -> CapTagBits
-function getCapTagBits(p : xlenbits) -> CapTagBits =
-  p[truisa_ptr_width - 1 .. truisa_ptr_width - cap_mode_width - cap_nc_width]
+function getCapTagBits(ptr : xlenbits) -> CapTagBits =
+  ptr[truisa_ptr_width - 1 .. truisa_ptr_width - cap_mode_width - cap_nc_width]
 
 // The N/C field: the bits just below mode. Split out because both getCapForm and
 // getCapBoundsBits need it, and duplicating the slice invites bit-position drift.
 val  getCapN : xlenbits -> bits(cap_nc_width)
-function getCapN(p : xlenbits) -> bits(cap_nc_width) =
-  p[truisa_ptr_width - 2 .. truisa_ptr_width - 1 - cap_nc_width]
+function getCapN(ptr : xlenbits) -> bits(cap_nc_width) =
+  ptr[truisa_ptr_width - 2 .. truisa_ptr_width - 1 - cap_nc_width]
 
 // Slot base of an aligned-slot pointer: SlotBase = p & ~(2^N - 1)
 // (docs/isa/04; ADR-0010 decision 4). Operates inside the address field only.
@@ -268,13 +268,13 @@ enum CapPtrForm = {
 }
 
 val  getCapForm : xlenbits -> CapPtrForm
-function getCapForm(p : xlenbits) -> CapPtrForm = {
-  let tag7 : CapTagBits = getCapTagBits(p);
+function getCapForm(ptr : xlenbits) -> CapPtrForm = {
+  let tag7 : CapTagBits = getCapTagBits(ptr);
   if      tag7 == 0b0111111 then FormPoisoned
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
-  else if p[truisa_ptr_width - 1] == 0b0 then FormCentroID
-  else if unsigned(getCapN(p)) > truisa_va then FormInvalid
+  else if ptr[truisa_ptr_width - 1] == 0b0 then FormCentroID
+  else if unsigned(getCapN(ptr)) > truisa_va then FormInvalid
   else FormAligned
 }
 
@@ -307,7 +307,7 @@ function slotBounds(addr : CapAddrBits, k : Int) -> (CapAddrBits, CapAddrBits) =
 }
 
 val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
-function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) = {
+function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)) = {
   // Returns the endpoints in the ADDRESS domain (48 bits); the instruction
   // sign-extends them to XLEN itself (spec/insns/gcbase.adoc and gcbound.adoc
   // both wrap the result in zero_extend_48).
@@ -318,11 +318,11 @@ function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) 
   //
   // The form decision itself lives in getCapForm(); this function only maps a
   // usable form to endpoints.
-  let p : xlenbits = capToBits(c);
-  let addr : CapAddrBits = p[47 .. 0];
-  match getCapForm(p) {
+  let ptr : xlenbits = capToBits(cap);
+  let addr : CapAddrBits = ptr[47 .. 0];
+  match getCapForm(ptr) {
     FormBare    => { let (base, bound) = slotBounds(addr, truisa_va); Some(base, bound) },
-    FormAligned => { let (base, bound) = slotBounds(addr, unsigned(getCapN(p))); Some(base, bound) },
+    FormAligned => { let (base, bound) = slotBounds(addr, unsigned(getCapN(ptr))); Some(base, bound) },
     _           => None(),          // poisoned / invalid / CentroID (phase 1)
   }
 }
@@ -371,8 +371,8 @@ function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits
   if bound <_u addr then None()                      // empty request: no byte to cover
   else {
     let diff : xlenbits = zero_extend(addr) ^ zero_extend(bound);
-    let c : Int = if diff == zeros() then 0 else xlen - count_leading_zeros(diff);
-    Some(to_bits(cap_nc_width, c))
+    let slotExp : Int = if diff == zeros() then 0 else xlen - count_leading_zeros(diff);
+    Some(to_bits(cap_nc_width, slotExp))
   }
 }
 
@@ -548,7 +548,7 @@ function getRepresentableAlignmentMask(len : xlenbits) -> xlenbits =
 // so the length is bound - base + 1 (not bound - base). The old name `top`
 // came from CHERI, where it meant the EXCLUSIVE upper bound -- opposite
 // semantics, which is exactly how the missing +1 slipped in.
-function getCapLength(c : Capability) -> CapLenInt =
+function getCapLength(cap : Capability) -> CapLenInt =
   match getCapBounds(c) {
     None() => 0,
     Some(base, bound) => {assert(bound >= base); bound - base + 1},
@@ -593,20 +593,20 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   // (size >= 1 was checked above, so size - 1 cannot underflow.) `a + size - 1`
   // is computed in Int, so it cannot wrap: an over-long request simply exceeds
   // bound and fails.
-  let a = unsigned(addr);
+  let addrInt = unsigned(addr);
   match getCapBounds(cap) {
     None()          => false,
-    Some(base, bound) => (a >= base) & ((a + size - 1) <= bound)
+    Some(base, bound) => (addrInt >= base) & ((addrInt + size - 1) <= bound)
   }
 }
 
 // Return true if any byte of the access is within the cap bounds
 // Used for certain CBO instructions
 function anyByteInCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
-  let a = unsigned(addr);
+  let addrInt = unsigned(addr);
   match getCapBounds(cap) {
     None() => false,
-    Some(base, bound) => ((a <= bound) & ((a + size) > base))
+    Some(base, bound) => ((addrInt <= bound) & ((addrInt + size) > base))
   }
 }
 
@@ -619,10 +619,10 @@ function anyByteInCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenI
 function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
   if size < 1 then false
   else {
-    let a = unsigned(addr);
+    let addrInt = unsigned(addr);
     match getCapBounds(cap) {
       None()          => false,
-      Some(base, bound) => (a >= base) & ((a + size - 1) <= bound),
+      Some(base, bound) => (addrInt >= base) & ((addrInt + size - 1) <= bound),
     }
   }
 }
@@ -732,15 +732,15 @@ function capBoundsEqual (c1 : Capability, c2 : Capability) -> bool =
     (Some(base1, bound1), Some(base2, bound2)) => (base1 == base2) & (bound1 == bound2)
   }
 
-function setCapAddr(c : Capability, addr : CapAddrBits) -> (bool, Capability) = {
-  let newCap = { c with address = addr };
+function setCapAddr(cap : Capability, addr : CapAddrBits) -> (bool, Capability) = {
+  let newCap = { cap with address = addr };
   // capBoundsEqual returns false if either input has malformed bounds, so the
   // representability check will fail if the old or new bounds were malformed.
-  let representable = capBoundsEqual(c, newCap);
+  let representable = capBoundsEqual(cap, newCap);
   (representable, newCap)
 }
 
-function setCapAddrChecked(c : Capability, addr : CapAddrBits) -> Capability = {
+function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability = {
   let (representable, newCap) = setCapAddr(c, addr);
   clearTagIf(newCap, not(representable) | capIsSealed(c) | not(capReservedValid(c)))
 }
@@ -750,7 +750,7 @@ overload operator >> = {sail_shiftright}
 overload operator << = {sail_shiftleft}
 overload operator >>_s = {sail_arith_shiftright}
 
-function incCapAddrChecked(c : Capability, delta : CapAddrBits) -> Capability =
+function incCapAddrChecked(cap : Capability, delta : CapAddrBits) -> Capability =
   setCapAddrChecked(c, c.address + delta)
 
 function capToString(cap : Capability) -> string = {
