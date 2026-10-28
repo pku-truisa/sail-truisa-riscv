@@ -690,56 +690,27 @@ overload operator >>_s = {sail_arith_shiftright}
 function incCapAddrChecked(cap : Capability, delta : CapAddrBits) -> Capability =
   setCapAddrChecked(cap, cap.address + delta)
 
+// Debug rendering of a capability. TruISA has only four fields plus the slot
+// geometry, so there is nothing to "legalize" and nothing to warn about: the
+// form already says whether the pointer is usable.
 function capToString(cap : Capability) -> string = {
-  let (base_str, top_str, bounds_malformed) : (string, string, bool) = match getCapBoundsBits(cap) {
-    None() => ("0 (malformed)", "0 (malformed)", true),
-    Some(base, bound) => (bits_str(base), bits_str(zero_extend(truisa_va, bound)), false)
+  let form_str : string = match getCapForm(capToBits(cap)) {
+    FormPoisoned   => "poisoned",
+    FormBare       => "bare",
+    FormAligned    => "aligned",
+    FormDescriptor => "descriptor",
+    FormInvalid    => "invalid",
   };
-
-  let len_str = bits_str(to_bits_unsafe(cap_len_width + 3, getCapLength(cap)));
-
-  let (arch_perms_str, perms_malformed) : (string, bool) = match getArchPerms(cap) {
-    None() => ("(malformed)", true),
-    Some(perms) => (
-      (if perms.R then "R" else "") ^
-      (if perms.W then "W" else "") ^
-      (if perms.C then "C" else "") ^
-      (if perms.X then "X" else "") ^
-      (if perms.LM then "Lm" else "") ^
-      (if perms.ASR then "Asr" else "") ^
-      (if perms.SL then "Sl" else "") ^
-      (if perms.EL then "El" else ""),
-      false
-    )
+  let (base_str, bound_str) : (string, string) = match getCapBoundsBits(cap) {
+    None()            => ("-", "-"),
+    Some(base, bound) => (bits_str(base), bits_str(bound)),
   };
-
-  // Warn if non-zero reserved bits encountered
-  let (res_str, reserved_malformed) : (string, bool) = if not(capReservedValid(cap)) then
-    (" (has non-zero reserved bits)", true)
-  else
-    ("", false);
-
-  // Print the raw metadata bits if they didn't decode to help debugging
-  let raw_str = if bounds_malformed | perms_malformed | reserved_malformed then
-    " raw:" ^ bits_str(capToBits(cap))
-  else
-    "";
-
-  let cheri_mode : string = match getCapMode(cap) {
-    CapPtrMode => "CapPtrMode",
-    IntPtrMode  => "Integer",
-  };
-
-  "t:" ^ (if cap.tag then "1" else "0") ^
-  " address:" ^ bits_str(cap.address) ^
+  "form:" ^ form_str ^
+  " mode:" ^ bits_str(cap.mode) ^
+  " nc:" ^ bits_str(cap.nc) ^
+  " pac:" ^ bits_str(cap.pac) ^
+  " addr:" ^ bits_str(cap.address) ^
   " base:" ^ base_str ^
-  " top:" ^ top_str ^
-  " length:" ^ len_str ^
-  " sealed:" ^ (if cap.sealed then "1" else "0") ^
-  " perms:" ^ arch_perms_str ^
-  " sdperms:" ^ bits_str(cap.sd_perms) ^
-  " level:" ^ bits_str(cap.cl) ^
-  " mode:" ^ cheri_mode ^
-  raw_str ^ res_str
+  " bound:" ^ bound_str
 }
 
