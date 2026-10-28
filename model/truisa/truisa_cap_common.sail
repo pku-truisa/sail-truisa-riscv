@@ -13,10 +13,16 @@
 //   bits 56-48    PAC     truisa_pac_width  = ptr - VA - mode - N/C (computed)
 //   bits 47-0     address truisa_va
 // Every width below is derived from these four; no bit position is hard-coded.
-// ⚠️ LITERAL 64, not `xlen`. Same limitation as truisa_pac_width below: Sail's
-// bit-slice quantifier cannot prove e.g. `48 <= (xlen - 2) - 6` when xlen is
-// symbolic, so bitsToCap fails with "Could not resolve quantifiers for
-// subrange_bits". TruISA targets RV64 only (ADR-0001), so the width is fixed.
+// ⚠️ LITERAL 64, not `xlen`. Three separate Sail limits converge here, and all
+// three are about "the value must be known at type-check time":
+//   1) bits(N) and every bit-slice index must be statically computable (xlen is
+//      symbolic, so cap_bits[xlen - 1] has no width);
+//   2) the quantifier cannot prove inequalities over a symbolic xlen, so even a
+//      provable-in-maths index like (xlen - 2) - 6 is rejected;
+//   3) widening to xlenbits later would demand a proof of 48 <= xlen.
+// Shifts are the escape hatch for *computation* on symbolic values; they are not
+// a way to define a width. TruISA targets RV64 only (ADR-0001), so fixing it is
+// the honest encoding of that fact.
 type truisa_ptr_width   : Int = 64
 let  truisa_ptr_width   = sizeof(truisa_ptr_width)
 type truisa_va          : Int = 48              // Sv48; Sv39 -> 39, Sv57 -> 57
@@ -27,14 +33,12 @@ type truisa_nc_width    : Int = 6
 let  truisa_nc_width    = sizeof(truisa_nc_width)
 // PAC takes whatever is left between the tag and the address:
 //   Sv39 -> 64-39-7 = 18 | Sv48 -> 64-48-7 = 9 | Sv57 -> 64-57-7 = 0
-// ⚠️ LITERAL, not an expression. Sail's type-level arithmetic cannot evaluate
-// `xlen - 55` (a symbolic width minus a constant), so bits(truisa_pac_width)
-// fails with a misleading "recursive types are forbidden". Multiplication by a
-// symbolic width is fine (see CapBits = bits(8 * cap_size)); subtraction is not.
+// ⚠️ LITERAL, not an expression -- see limit (1) at truisa_ptr_width. Sail reports
+// `bits(xlen - 55)` as "recursive types are forbidden", which is its generic
+// message for "I could not evaluate this width"; the type is not really recursive.
 // 9 == 64 (ptr) - 48 (VA) - 1 (mode) - 6 (N/C) for the Sv48 profile.
-// ⭐ Changing truisa_va REQUIRES updating this number; that is the price of the
-// limitation above. Keep the derivation in this comment so the check is manual
-// but possible.
+// ⭐ Changing truisa_va REQUIRES updating this number. The derivation stays here
+// so the check is manual but possible.
 type truisa_pac_width   : Int = 9
 let  truisa_pac_width   = sizeof(truisa_pac_width)
 
@@ -45,9 +49,8 @@ let  truisa_pac_width   = sizeof(truisa_pac_width)
 // Width of capability in bytes (excluding tag).
 // TODO: Rename to clen_bytes and clen?
 // TODO: Change root xlen to be in terms of the log2 bytes.
-// ⚠️ LITERAL 8 (= xlen_bytes on RV64). Keeping xlen_bytes makes every
-// cap_bits[i] index unprovable ("Could not resolve quantifiers for
-// bitvector_access"), because xlen is symbolic at type-check time.
+// ⚠️ LITERAL 8 (= xlen_bytes on RV64) -- see limit (1) at truisa_ptr_width.
+// With xlen_bytes here, every cap_bits[i] index becomes unprovable.
 type cap_size : Int = 8                   // TruISA: pointer is 64-bit (CHERI used xlen_bytes * 2)
 let  cap_size = sizeof(cap_size)
 
