@@ -1,29 +1,26 @@
 /*=======================================================================================*/
-/*  TruISA: enumerated types of the pointer model.                                       */
-/*                                                                                       */
-/*  Copy-and-adapt of model/cheri/cheri_types.sail. Same file role: CHERI keeps its       */
-/*  enum / struct definitions there and its bits()/range() slice types in                 */
-/*  cheri_cap_common.sail -- TruISA follows that split exactly.                          */
-/*                                                                                       */
-/*  TRUISA DELTA vs cheri_types.sail:                                                    */
-/*    - CapPtrForm is new: CHERI asks "is the tag bit set", TruISA asks "which of five    */
-/*      forms is this 7-bit label".                                                      */
-/*    - NOT here (TruISA has no counterpart): CPtrCmpOp (no capability compare op),       */
-/*      ClearRegSet (no tag clearing set), ExecutionMode (the tier lives in               */
-/*      truisa_addr_checks.sail as ExecTier), ArchPerms / null_perms (no permission       */
-/*      bits at all).                                                                    */
-/*    - CapCheckType / CapEx are still pending: upstream riscv_inst_retire.sail declares  */
-/*      CHERI_Exception : (CapCheckType, CapEx, virtaddr), so TruISA must eventually       */
-/*      provide both here -- but the set of CapEx values is waiting on the architecture    */
-/*      group's ruling (see the CRE notice), so they are deliberately absent for now.     */
+/*  TruISA: placeholder for model/cheri/cheri_types.sail
+/*
+/*  Why this file exists: the fork mirrors the CHERI tree one file for one, so that
+/*  the two models can be read side by side and every position in
+/*  model/CMakeLists.txt has a counterpart. An empty placeholder is still meaningful:
+/*  it marks a position where the answer is "TruISA has nothing here", and that
+/*  answer has to be justified like any other.
+/*
+/*  What the blueprint file does: CPtrCmpOp / ClearRegSet / CapEx / CapCheckType / ExecutionMode / ArchPerms.
+/*
+/*  Status: NOT YET ANALYSED. Nothing is defined below. The analysis of this file
+/*  happens in dependency order, from the top of model/CMakeLists.txt down; until
+/*  then the fork does not type-check, and that is expected -- a missing definition
+/*  is a question for spec, not something to paper over with a stub that compiles.
+/*
+/*  Rules for filling this in (see CODE_STYLE.md, "Fork rule"):
+/*    1. Copy the blueprint block order, then edit; do not rewrite from scratch.
+/*    2. Mark every deviation with // TRUISA DELTA: and name the ADR that forces it.
+/*    3. If the answer is "the upstream riscv_*.sail already does this", say so here
+/*       and leave the file empty instead of duplicating it.
+/*    4. If nobody knows what the definition should be, stop and raise a CR --
+/*       do not invent a definition that merely satisfies the type checker.
 /*=======================================================================================*/
 
-// The five forms a 7-bit label can denote. Decision order is documented at
-// getCapForm in truisa_cap_common.sail (the order is not arbitrary -- see there).
-enum CapPtrForm = {
-  FormPoisoned,
-  FormBare,
-  FormInvalid,
-  FormDescriptor,      // reserved: no operator produces it in phase 1
-  FormAligned,
-}
+/* TODO(truisa): analysis pending. */

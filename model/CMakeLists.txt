@@ -17,6 +17,227 @@ set(sail_common
     --require-version ${SAIL_REQUIRED_VER}
 )
 
+# ---------------------------------------------------------------------------------
+#  TruISA file chain: a one-for-one mirror of the CHERI sets above.
+#
+#  Same grouping, same order, same variable names with a truisa_ prefix -- so the
+#  two chains can be read line by line against each other. Every cheri/X.sail
+#  becomes truisa_X.sail; no entry is dropped and none is invented, which is what
+#  makes "which file does TruISA not need" a question answered inside that file
+#  (by staying empty) rather than by silently removing it from the list.
+#
+#  ⛔ No cheri/* entry may appear below (see "Fork rule" in CODE_STYLE.md).
+#  ⚠️ This chain does not type-check yet on purpose: the placeholder files are
+#     analysed one at a time in dependency order.
+# ---------------------------------------------------------------------------------
+    set(truisa_cap_impl
+        "truisa_prelude_64.sail"
+        "truisa_prelude_128.sail"
+        "truisa_prelude_xlen.sail"
+    )
+
+    # Instruction sources, depending on target
+    set(truisa_check_srcs
+        "riscv_addr_checks_common.sail"
+        "truisa_addr_checks.sail"
+    )
+
+    set(truisa_vext_srcs
+        "riscv_insts_vext_utils.sail"
+        "riscv_insts_vext_fp_utils.sail"
+        "riscv_insts_vext_vset.sail"
+        "riscv_insts_vext_arith.sail"
+        "riscv_insts_vext_fp.sail"
+        "riscv_insts_vext_mem.sail"
+        "riscv_insts_vext_mask.sail"
+        "riscv_insts_vext_vm.sail"
+        "riscv_insts_vext_fp_vm.sail"
+        "riscv_insts_vext_red.sail"
+        "riscv_insts_vext_fp_red.sail"
+    )
+
+    set(truisa_default_inst
+        "riscv_insts_base.sail"
+        "riscv_insts_zifencei.sail"
+        "riscv_insts_zaamo.sail"
+        "riscv_insts_zalrsc.sail"
+        "riscv_insts_zca.sail"
+        "riscv_insts_mext.sail"
+        "riscv_insts_zicsr.sail"
+        "riscv_insts_hext.sail"
+        "riscv_insts_reserved_fence.sail"
+        "truisa_csr_op.sail"
+        "riscv_insts_fext.sail"
+        "riscv_insts_zcf.sail"
+        "riscv_insts_dext.sail"
+        "riscv_insts_zcd.sail"
+        "riscv_insts_svinval.sail"
+        "riscv_insts_zba.sail"
+        "riscv_insts_zbb.sail"
+        "riscv_insts_zbc.sail"
+        "riscv_insts_zbs.sail"
+        "riscv_insts_zcb.sail"
+        "riscv_insts_zfh.sail"
+        # Zfa needs to be added after fext, dext and Zfh (as it needs
+        # definitions from those)
+        "riscv_insts_zfa.sail"
+        "riscv_insts_zkn.sail"
+        "riscv_insts_zks.sail"
+        "riscv_insts_zbkb.sail"
+        "riscv_insts_zbkx.sail"
+        "riscv_insts_zicond.sail"
+        ${truisa_vext_srcs}
+        "riscv_insts_zicbom.sail"
+        "riscv_insts_zicboz.sail"
+        "riscv_insts_zawrs.sail"
+        "riscv_insts_zvbb.sail"
+        "riscv_insts_zvbc.sail"
+        "riscv_insts_zvkg.sail"
+        "riscv_insts_zvkned.sail"
+        "riscv_insts_zvknhab.sail"
+        "riscv_insts_zvksed.sail"
+        "riscv_insts_zvksh.sail"
+        "truisa_insts_begin.sail"
+        "truisa_inst.sail"
+        "truisa_insts_cext.sail"
+        "truisa_insts_zba.sail"
+        "truisa_insts_end.sail"
+        # Zimop and Zcmop should be at the end so they can be overridden by earlier extensions
+        "riscv_insts_zimop.sail"
+        "riscv_insts_zcmop.sail"
+    )
+
+
+    set(truisa_seq_inst_srcs
+        "riscv_insts_begin.sail"
+        ${truisa_seq_inst}
+        "riscv_insts_end.sail"
+        "truisa_csr_ext.sail"
+        "riscv_csr_end.sail"
+    )
+
+    set(truisa_sys_srcs
+        "riscv_vext_control.sail"
+        "truisa_sys_regs_access.sail"
+        "riscv_sys_regs_access_common.sail"
+        "truisa_sys_exceptions.sail"
+        "riscv_sync_exception.sail"
+        "riscv_zihpm.sail"
+        "riscv_sscofpmf.sail"
+        "riscv_zkr_control.sail"
+        "riscv_zicntr_control.sail"
+        "riscv_softfloat_interface.sail"
+        "riscv_fdext_regs.sail"
+        "riscv_fdext_control.sail"
+        "riscv_smcntrpmf.sail"
+        "riscv_pma.sail"
+        "riscv_svpbmt.sail"
+        "riscv_sys_reservation.sail"
+        "riscv_sys_control.sail"
+    )
+
+    set(truisa_vm_srcs
+        "truisa_vmem_ptw.sail"
+        "riscv_vmem_pte_types.sail"
+        "truisa_vmem_pte_types_ext.sail"
+        "truisa_vmem_pte_validity_ext.sail"
+        "riscv_vmem_pte.sail"
+        "truisa_vmem_pte_ext.sail"
+        "riscv_vmem_tlb.sail"
+        "riscv_vmem.sail"
+        "riscv_vmem_utils.sail"
+        "riscv_vmem_access.sail"
+    )
+
+    set(truisa_prelude
+        "truisa_prelude.sail"
+        "riscv_errors.sail"
+        "range_util.sail"
+        "riscv_xlen.sail"
+        "riscv_flen.sail"
+        "riscv_vlen.sail"
+        "truisa_prelude.sail"
+        "truisa_types.sail"
+        ${truisa_cap_impl}
+        "prelude_mem_addrtype.sail"
+        "truisa_mem_metadata.sail"
+        "prelude_mem.sail"
+        "arithmetic.sail"
+        "truisa_cap_common.sail"
+        "rvfi_dii.sail"
+        "rvfi_dii_v1.sail"
+        "rvfi_dii_v2.sail"
+    )
+
+    set(truisa_regs_srcs
+        "riscv_callbacks.sail"
+        "truisa_reg_type.sail"
+        "riscv_freg_type.sail"
+        "truisa_vmem_types.sail"
+        "riscv_regs.sail"
+        "truisa_sys_regs_types.sail"
+        "truisa_sys_regs_xstatus.sail"
+        "riscv_sys_regs.sail"
+        "truisa_sys_regs_envcfg.sail"
+        "riscv_pmp_regs.sail"
+        "riscv_pmp_control.sail"
+        "truisa_sys_regs.sail"
+        "truisa_regs.sail"
+        "riscv_pc_access.sail"
+        "riscv_vreg_type.sail"
+        "riscv_vext_regs.sail"
+    )
+
+    set(truisa_arch_srcs
+        ${truisa_prelude}
+        "riscv_types_common.sail"
+        "truisa_riscv_types.sail"
+        "riscv_extensions.sail"
+        "riscv_types.sail"
+        "riscv_csr_begin.sail"
+        "riscv_convert_invalid_addr.sail"
+        ${truisa_regs_srcs}
+        ${truisa_sys_srcs}
+        "riscv_platform.sail"
+        ${truisa_check_srcs}
+        "riscv_sstc.sail"
+        "riscv_mem.sail"
+        "truisa_mem.sail"
+        "riscv_inst_retire.sail"
+        ${truisa_vm_srcs}
+        # Shared/common code for the cryptography extension.
+        "riscv_types_kext.sail"
+        "riscv_zvk_utils.sail"
+    )
+
+    set(truisa_step_srcs
+        "riscv_step_common.sail"
+        "truisa_step_ext.sail"
+        "truisa_decode_ext.sail"
+        "riscv_fetch_rvfi.sail"
+        "riscv_fetch.sail"
+        "riscv_step.sail"
+    )
+
+
+    set(truisa_cfg_srcs
+        "riscv_validate_config.sail"
+        "riscv_device_tree.sail"
+    )
+
+    set(truisa_model_srcs
+        "riscv_model.sail"
+    )
+
+    set(truisa_srcs
+        ${truisa_arch_srcs}
+        ${truisa_seq_inst_srcs}
+        ${truisa_step_srcs}
+        ${truisa_cfg_srcs}
+        ${truisa_model_srcs}
+        "main.sail"
+    )
+
 foreach (variant IN ITEMS "" "smt" "rocq" "rmem" "lean" "lem" "isabelle")
 
     # TruISA has no formalisation variants (no smt/rocq/lean/lem/rmem targets):
@@ -243,157 +464,8 @@ foreach (variant IN ITEMS "" "smt" "rocq" "rmem" "lean" "lem" "isabelle")
 
     # Final file list.
     if (TRUISA)
-        # The fork's chain, listed here rather than in a separate .cmake file so
-        # that this script stays the single place where a file list lives -- the
-        # same shape as the CHERI sets above. Contents: the upstream riscv_* files
-        # in dependency order, then the fork's own; no cheri/* entry (see the
-        # "Fork rule" in CODE_STYLE.md).
-        #
-        # Order matters: Sail resolves names as it reads, so a definition must
-        # precede every use. The two inline comments below mark the known
-        # constraints that pin the fork files into place.
-        set(sail_srcs
-        prelude.sail
-        riscv_errors.sail
-        range_util.sail
-        riscv_xlen.sail
-        riscv_flen.sail
-        riscv_vlen.sail
-        prelude_mem_addrtype.sail
-        prelude_mem_metadata.sail
-        prelude_mem.sail
-        arithmetic.sail
-        rvfi_dii.sail
-        rvfi_dii_v1.sail
-        rvfi_dii_v2.sail
-        riscv_types_common.sail
-        riscv_types_ext.sail
-        riscv_types.sail
-        # TruISA core vocabulary must exist before any upstream file references
-        # Capability / setCapAddrChecked (riscv_pc_access.sail does).
-        truisa/truisa_types.sail
-        truisa/truisa_cap_common.sail
-        riscv_extensions.sail
-        riscv_csr_begin.sail
-        riscv_convert_invalid_addr.sail
-        riscv_callbacks.sail
-        riscv_reg_type.sail
-        riscv_freg_type.sail
-        riscv_vmem_types.sail
-        riscv_regs.sail
-        riscv_sys_regs_xstatus.sail
-        # sits here, not at the end, because it must precede riscv_sys_regs.sail
-        truisa/truisa_sys_regs_types.sail
-        riscv_sys_regs.sail
-        riscv_sys_regs_envcfg.sail
-        riscv_pmp_regs.sail
-        riscv_pmp_control.sail
-        riscv_pc_access.sail
-        riscv_vreg_type.sail
-        riscv_vext_regs.sail
-        riscv_vext_control.sail
-        riscv_sys_regs_access.sail
-        riscv_sys_regs_access_common.sail
-        riscv_sys_exceptions.sail
-        riscv_sync_exception.sail
-        riscv_zihpm.sail
-        riscv_sscofpmf.sail
-        riscv_zkr_control.sail
-        riscv_zicntr_control.sail
-        riscv_softfloat_interface.sail
-        riscv_fdext_regs.sail
-        riscv_fdext_control.sail
-        riscv_smcntrpmf.sail
-        riscv_pma.sail
-        riscv_svpbmt.sail
-        riscv_sys_reservation.sail
-        riscv_sys_control.sail
-        riscv_platform.sail
-        riscv_addr_checks_common.sail
-        riscv_addr_checks.sail
-        riscv_sstc.sail
-        riscv_mem.sail
-        riscv_inst_retire.sail
-        riscv_vmem_ptw.sail
-        riscv_vmem_pte_types.sail
-        riscv_vmem_pte_types_ext.sail
-        riscv_vmem_pte_validity_ext.sail
-        riscv_vmem_pte.sail
-        riscv_vmem_pte_ext.sail
-        riscv_vmem_tlb.sail
-        riscv_vmem.sail
-        riscv_vmem_utils.sail
-        riscv_vmem_access.sail
-        riscv_types_kext.sail
-        riscv_zvk_utils.sail
-        riscv_insts_begin.sail
-        riscv_insts_base.sail
-        riscv_insts_zifencei.sail
-        riscv_insts_zaamo.sail
-        riscv_insts_zalrsc.sail
-        riscv_insts_zca.sail
-        riscv_insts_mext.sail
-        riscv_insts_zicsr.sail
-        riscv_insts_hext.sail
-        riscv_insts_reserved_fence.sail
-        riscv_csr_op.sail
-        riscv_insts_fext.sail
-        riscv_insts_zcf.sail
-        riscv_insts_dext.sail
-        riscv_insts_zcd.sail
-        riscv_insts_svinval.sail
-        riscv_insts_zba.sail
-        riscv_insts_zbb.sail
-        riscv_insts_zbc.sail
-        riscv_insts_zbs.sail
-        riscv_insts_zcb.sail
-        riscv_insts_zfh.sail
-        riscv_insts_zfa.sail
-        riscv_insts_zkn.sail
-        riscv_insts_zks.sail
-        riscv_insts_zbkb.sail
-        riscv_insts_zbkx.sail
-        riscv_insts_zicond.sail
-        riscv_insts_vext_utils.sail
-        riscv_insts_vext_fp_utils.sail
-        riscv_insts_vext_vset.sail
-        riscv_insts_vext_arith.sail
-        riscv_insts_vext_fp.sail
-        riscv_insts_vext_mem.sail
-        riscv_insts_vext_mask.sail
-        riscv_insts_vext_vm.sail
-        riscv_insts_vext_fp_vm.sail
-        riscv_insts_vext_red.sail
-        riscv_insts_vext_fp_red.sail
-        riscv_insts_zicbom.sail
-        riscv_insts_zicboz.sail
-        riscv_insts_zawrs.sail
-        riscv_insts_zvbb.sail
-        riscv_insts_zvbc.sail
-        riscv_insts_zvkg.sail
-        riscv_insts_zvkned.sail
-        riscv_insts_zvknhab.sail
-        riscv_insts_zvksed.sail
-        riscv_insts_zvksh.sail
-        riscv_insts_end.sail
-        riscv_insts_zimop.sail
-        riscv_insts_zcmop.sail
-        riscv_jalr_seq.sail
-        riscv_csr_end.sail
-        riscv_step_common.sail
-        riscv_step_ext.sail
-        riscv_decode_ext.sail
-        riscv_fetch_rvfi.sail
-        riscv_fetch.sail
-        riscv_step.sail
-        riscv_validate_config.sail
-        riscv_device_tree.sail
-        riscv_model.sail
-        main.sail
-        truisa/truisa_regs.sail
-        truisa/truisa_addr_checks.sail
-        truisa/truisa_inst.sail
-        )
+        # Built from the truisa_* sets above, which mirror the CHERI ones one for one.
+        set(sail_srcs ${truisa_srcs})
     else()
         set(sail_srcs
             ${sail_arch_srcs}
