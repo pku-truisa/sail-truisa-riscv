@@ -570,12 +570,12 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   //                `addr + size - 1 <= bound`, that is almost always TRUE
   //                (addr - 1 <= bound) -> zero-length objects would look valid
   //                everywhere.
-  // size > 2^VA  : `addr + size - 1` wraps in 64 bits (addr = 0 with
-  //                size = 2^48 + 1 yields 2^48); an unsigned comparison would
-  //                wrongly pass.
-  // TODO(G3): the signature still takes Capability / CapLenInt and the body is
-  //           still CHERI's top-based half-open test. Rewrite together with
-  //           setCapBounds / getCapBounds / inCapBoundsNoWrap.
+  // size > 2^VA  : rejects requests longer than the address space outright.
+  //                (Historically this guard also stopped `addr + size - 1`
+  //                from wrapping in a 64-bit bit-vector. That reason is gone:
+  //                the comparison below runs in Int, which cannot wrap. The
+  //                guard stays because a request longer than the space is
+  //                meaningless, not because of arithmetic.)
   // --- Zero-address veto (spec/ch04 "零地址判据"). Independent of the three
   // --- steps, and applies to EVERY form including Bare: address 0 is reserved
   // --- as NULL. The bounds interval is NOT shrunk (it still starts at 0), so
@@ -602,11 +602,19 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
 
 // Return true if any byte of the access is within the cap bounds
 // Used for certain CBO instructions
+// "Does ANY byte of [addr, addr+size) lie inside the bounds?" -- the predicate
+// used where over-approximation is the safe answer (it is a MAY, not a MUST).
+// Guard size >= 1 locally: with size = 0 the second conjunct degenerates to
+// `addrInt > base`, which is true for most addresses, so a zero-length request
+// would claim to touch the object.
 function anyByteInCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
-  let addrInt = unsigned(addr);
-  match getCapBounds(cap) {
-    None() => false,
-    Some(base, bound) => ((addrInt <= bound) & ((addrInt + size) > base))
+  if size < 1 then false
+  else {
+    let addrInt = unsigned(addr);
+    match getCapBounds(cap) {
+      None()            => false,
+      Some(base, bound) => ((addrInt <= bound) & ((addrInt + size) > base)),
+    }
   }
 }
 
