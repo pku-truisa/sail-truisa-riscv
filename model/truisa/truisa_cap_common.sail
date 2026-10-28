@@ -33,13 +33,12 @@ type truisa_nc_width    : Int = 6
 let  truisa_nc_width    = sizeof(truisa_nc_width)
 // PAC takes whatever is left between the tag and the address:
 //   Sv39 -> 64-39-7 = 18 | Sv48 -> 64-48-7 = 9 | Sv57 -> 64-57-7 = 0
-// ⚠️ LITERAL, not an expression -- see limit (1) at truisa_ptr_width. Sail reports
-// `bits(xlen - 55)` as "recursive types are forbidden", which is its generic
-// message for "I could not evaluate this width"; the type is not really recursive.
-// 9 == 64 (ptr) - 48 (VA) - 1 (mode) - 6 (N/C) for the Sv48 profile.
-// ⭐ Changing truisa_address_width REQUIRES updating this number. The derivation stays here
-// so the check is manual but possible.
-type truisa_pac_width   : Int = 9
+// An expression is fine here -- what matters is that every operand is a compile-time
+// constant. truisa_ptr_width is the literal 64 below, and the other three are 48/1/6,
+// so this folds to 9 and bits(truisa_pac_width) accepts it. (It only fails when the
+// expression reaches xlen, which is a config variable, not a constant.)
+// ⭐ This is why changing truisa_address_width is a one-place edit after all.
+type truisa_pac_width : Int = truisa_ptr_width - truisa_address_width - truisa_mode_width - truisa_nc_width
 let  truisa_pac_width   = sizeof(truisa_pac_width)
 
 // ---- CHERI-compatibility aliases: keep the blueprint's field/type names so
