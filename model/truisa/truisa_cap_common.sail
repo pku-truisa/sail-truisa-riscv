@@ -656,75 +656,6 @@ function capIsSubset(c0 : Capability, c1 : Capability) -> bool = {
   bounds_subset & perms_subset & level_subset & reserved_valid;
 }
 
-function clearTagIf(cap : Capability, cond : bool) -> Capability =
-  {cap with tag = cap.tag & not(cond)}
-
-function clearTag(cap : Capability) -> Capability =
-  {cap with tag = false}
-
-function legalizeLoadedArchPerms(loaded_cap : Capability, auth_cap : Capability) -> Capability = {
-  // If a capability grants R-permission and C-permission, but no LM-permission, then
-  // a capability loaded via this authorizing capability will have W-permission and
-  // LM-permission removed provided that the loaded capability has its tag set and
-  // is not sealed; loaded capabilities that are sealed or untagged do not have
-  // their permissions changed.
-
-  // Any unsealed capability with its tag set to 1 that is loaded from memory has
-  // its EL-permission cleared ... if the authorizing capability does not grant EL-permission.
-
-  let tagged_and_unsealed = loaded_cap.tag & not(capIsSealed(loaded_cap));
-  let clearWLM = tagged_and_unsealed & not(canLM(auth_cap));
-  let clearEL = tagged_and_unsealed & not(canEL(auth_cap));
-
-  if clearWLM | clearEL then {
-    let perms = getArchPermsLegalized(loaded_cap);
-    let perms = { perms with
-      W = perms.W & not(clearWLM),
-      LM = perms.LM & not(clearWLM),
-      EL = perms.EL & not(clearEL),
-    };
-    setArchPerms(loaded_cap, perms)
-  } else loaded_cap
-}
-
-function restrictLoadedCL(loaded_cap : Capability, auth_cap : Capability) -> Capability = {
-  // Any unsealed capability with its tag set to 1 that is loaded from memory has
-  // ... its Capability Level (CL) restricted to the
-  // authorizing capability’s Capability Level (CL) if the authorizing capability
-  // does not grant EL-permission. If sealed, then only CL is modified ...
-
-  let restrictCL = loaded_cap.tag & not(canEL(auth_cap));
-  if restrictCL then {loaded_cap with cl = auth_cap.cl & loaded_cap.cl} else loaded_cap
-}
-
-function legalizeSL(stored_cap : Capability, auth_cap : Capability) -> Capability = {
-  // When storing a capability, if the authorizing capability does not grant SL-perm
-  // and the stored cap has CL == 0 clear the tag of the stored capability,
-  // otherwise store the cap data unmodified.
-  let cond = not(canSL(auth_cap)) & stored_cap.cl == zeros();
-  clearTagIf(stored_cap, cond)
-}
-
-// Implementations are allowed to retain invalid capability permissions loaded from memory
-// instead of following the ACPERM behaviour of reducing them to no permissions.
-let sys_legalize_malformed_permission_on_load = false
-
-function legalizeLoadedPermissions(loaded_cap : Capability, auth_cap : Capability) -> Capability = {
-  // CL is not a permission so it is always legalized.
-  let loaded_cap = restrictLoadedCL(loaded_cap, auth_cap);
-
-  // Malformed permissions are optionally legalized.
-  if not(permsMalformed(loaded_cap)) | sys_legalize_malformed_permission_on_load then {
-    legalizeLoadedArchPerms(loaded_cap, auth_cap)
-  } else {
-    loaded_cap
-  }
-}
-
-function legalizeStoredPermissions(stored_cap : Capability, auth_cap : Capability) -> Capability = {
-  legalizeSL(stored_cap, auth_cap)
-}
-
 function capBoundsEqual (c1 : Capability, c2 : Capability) -> bool =
   match (getCapBounds(c1), getCapBounds(c2)) {
     (None(), _) => false,
@@ -740,9 +671,15 @@ function setCapAddr(cap : Capability, addr : CapAddrBits) -> (bool, Capability) 
   (representable, newCap)
 }
 
+// Moving the address is allowed as long as the SLOT does not change; otherwise
+// the result is poisoned. TruISA has no tag bit, no sealed state and no
+// reserved bits, so CHERI's clearTagIf(newCap, not(rep) | sealed | !reserved)
+// collapses to poisonIf(newCap, not(rep)).
+// poisonIf keeps `address`, so a poisoned pointer still answers GCADDR
+// (spec/ch03: the address field survives poisoning).
 function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability = {
-  let (representable, newCap) = setCapAddr(c, addr);
-  clearTagIf(newCap, not(representable) | capIsSealed(c) | not(capReservedValid(c)))
+  let (representable, newCap) = setCapAddr(cap, addr);
+  poisonIf(newCap, not(representable))
 }
 
 infix 1 >>_s
@@ -751,7 +688,7 @@ overload operator << = {sail_shiftleft}
 overload operator >>_s = {sail_arith_shiftright}
 
 function incCapAddrChecked(cap : Capability, delta : CapAddrBits) -> Capability =
-  setCapAddrChecked(c, c.address + delta)
+  setCapAddrChecked(cap, cap.address + delta)
 
 function capToString(cap : Capability) -> string = {
   let (base_str, top_str, bounds_malformed) : (string, string, bool) = match getCapBoundsBits(cap) {
