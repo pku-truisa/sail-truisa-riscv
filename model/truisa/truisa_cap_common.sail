@@ -6,11 +6,29 @@
 /*  SPDX-License-Identifier: BSD-2-Clause                                                */
 /*=======================================================================================*/
 
-// Width profile lives in truisa_prelude.sail (single source of truth).
+/* ===== TruISA width switch: the ONLY place to change the VA profile ===== */
+// Pointer layout (ADR-0003 rev 12), from the top bit down:
+//   bit 63        mode    truisa_mode_width = 1
+//   bits 62-57    N/C     truisa_nc_width   = 6
+//   bits 56-48    PAC     truisa_pac_width  = ptr - VA - mode - N/C (computed)
+//   bits 47-0     address truisa_va
+// Every width below is derived from these four; no bit position is hard-coded.
+type truisa_ptr_width   : Int = xlen           // 64 on RV64 (TruISA targets RV64)
+let  truisa_ptr_width   = sizeof(truisa_ptr_width)
+type truisa_va          : Int = 48              // Sv48; Sv39 -> 39, Sv57 -> 57
+let  truisa_va          = sizeof(truisa_va)
+type truisa_mode_width  : Int = 1
+let  truisa_mode_width  = sizeof(truisa_mode_width)
+type truisa_nc_width    : Int = 6
+let  truisa_nc_width    = sizeof(truisa_nc_width)
+// PAC takes whatever is left between the tag and the address:
+//   Sv39 -> 64-39-7 = 18 | Sv48 -> 64-48-7 = 9 | Sv57 -> 64-57-7 = 0
+type truisa_pac_width   : Int = truisa_ptr_width - truisa_va - truisa_mode_width - truisa_nc_width
+let  truisa_pac_width   = sizeof(truisa_pac_width)
 
-// ---- Remaining blueprint-compatible widths. cap_mode_width / cap_nc_width /
-// ---- cap_pac_width live in truisa_prelude.sail together with the truisa_*
-// ---- originals; the ones below are the CHERI names that TruISA keeps as-is.
+// ---- CHERI-compatibility aliases: keep the blueprint's field/type names so
+// ---- that the rest of the model needs no renaming. The truisa_* names above
+// ---- remain the ONLY place to change a width.
 
 // Width of capability in bytes (excluding tag).
 // TODO: Rename to clen_bytes and clen?
@@ -22,6 +40,12 @@ type cap_addr_width : Int = truisa_va          // was xlen (CHERI); TruISA uses 
 let  cap_addr_width = sizeof(cap_addr_width)
 type cap_len_width : Int = cap_addr_width + 1
 let  cap_len_width = sizeof(cap_len_width)
+type cap_mode_width : Int = truisa_mode_width
+let  cap_mode_width = sizeof(cap_mode_width)
+type cap_nc_width : Int = truisa_nc_width
+let  cap_nc_width = sizeof(cap_nc_width)
+type cap_pac_width : Int = truisa_pac_width
+let  cap_pac_width = sizeof(cap_pac_width)
 
 type cap_max_len : Int = (2 ^ cap_len_width) - 1
 let  cap_max_len = sizeof(cap_max_len)
