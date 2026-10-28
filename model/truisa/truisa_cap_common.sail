@@ -263,11 +263,11 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
  * so the range test runs BEFORE the mode split, and it is the same test for
  * both forms (anything above VA is an illegal code point either way):
  *   N/C > VA              -> Invalid code point  (both forms)
- *   bit 63 = 0, N/C = 0   -> Invalid code point  (a descriptor's C starts at 1)
  *   bit 63 = 0            -> Descriptor form (reserved for phase 2)
  *   otherwise             -> Aligned slot
- * ⚠️ The mode-dependent part is only the LOWER bound: N = 0 is a legal aligned
- * slot (a 1-byte object) but C = 0 is not a legal descriptor.
+ * ⚠️ No lower-bound test is needed for the descriptor: N/C = 0 together with
+ * bit 63 = 0 is the tag 0000000, which was already classified as Bare above.
+ * So any tag reaching the descriptor branch has C >= 1, as spec requires.
  */
 enum CapPtrForm = {
   FormPoisoned,
@@ -285,8 +285,7 @@ function getCapForm(ptr : xlenbits) -> CapPtrForm = {
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
   else if nc > truisa_va then FormInvalid              // both forms: N/C in 0..VA
-  else if tag7[6] == 0b0 then
-    (if nc == 0 then FormInvalid else FormDescriptor)  // descriptor C in 1..VA
+  else if tag7[6] == 0b0 then FormDescriptor
   else FormAligned
 }
 
