@@ -247,24 +247,29 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
  * ADR-0003 rev 12. Every caller that needs to know "what kind of pointer is
  * this / is it usable" must ask getCapForm() rather than re-deriving it, otherwise
  * the checks drift apart (that is exactly how the CHERI boundsMalformed /
- * getCapBoundsBits pair ended up disagreeing).
+ * getCapBoundsBits pair ended up disagreeing -- boundsMalformed itself is gone:
+ * getCapForm already answers it with one enum compare).
  *
- * Decision order is forced by the bit patterns:
- *   bits 63-57 = 0111111  -> poisoned        (checked FIRST: 0111111 would
- *                                             otherwise look like N/C = 63)
- *   bits 63-57 = 0000000  -> bare (low half)
- *   bits 63-57 = 1111111  -> bare (high half)  (1111111 would otherwise look
- *                                             like mode=1, N/C=63)
- *   bit 63 = 0            -> CentroID form (unsupported in phase 1)
- *   N/C >= VA             -> invalid code point
- *   otherwise             -> aligned slot
+ * Decision order is forced by the bit patterns. The two all-ones/all-zeros
+ * tags are peeled off FIRST, because 0111111 would otherwise look like
+ * "mode = 0, N/C = 63" and 1111111 like "mode = 1, N/C = 63":
+ *   bits 63-57 = 0111111  -> poisoned
+ *   bits 63-57 = 0000000  -> bare
+ *   bits 63-57 = 1111111  -> bare
+ * Then the mode bit splits the remaining space, BEFORE the N/C range check --
+ * the check only applies to an aligned slot, where N/C really is a block
+ * exponent. A descriptor's N/C field means something else (phase 2), so it must
+ * not be rejected by a block-exponent range test here:
+ *   bit 63 = 0            -> Descriptor form (reserved for phase 2)
+ *   N/C > VA              -> Invalid code point (aligned slots only)
+ *   otherwise             -> Aligned slot
  */
 enum CapPtrForm = {
   FormPoisoned,
   FormBare,
-  FormAligned,
   FormInvalid,
-  FormCentroID,
+  FormDescriptor,      // reserved: no operator produces it in phase 1
+  FormAligned,
 }
 
 val  getCapForm : xlenbits -> CapPtrForm
@@ -273,29 +278,10 @@ function getCapForm(ptr : xlenbits) -> CapPtrForm = {
   if      tag7 == 0b0111111 then FormPoisoned
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
-  else if ptr[truisa_ptr_width - 1] == 0b0 then FormCentroID
-  else if unsigned(getCapN(ptr)) > truisa_va then FormInvalid
+  else if tag7[6] == 0b0    then FormDescriptor
+  else if unsigned(tag7[5 .. 0]) > truisa_va then FormInvalid
   else FormAligned
 }
-
-// TruISA counterpart of CHERI's boundsMalformed.
-//
-// CHERI asks "does the COMPRESSED encoding describe an illegal capability",
-// with two cases (lost significant bits at the top, or a negative / L8-zero
-// exponent). TruISA has no compressed encoding, so the only code point that is
-// encodable yet illegal is an out-of-range slot exponent -- and getCapForm()
-// already classifies that as FormInvalid. This predicate exists only so that
-// callers needing a plain yes/no do not have to match on the enum.
-//
-// NOT covered here (deliberately, each is a DIFFERENT state):
-//   - poisoned (bits 63-57 = 0111111): a defined state, not malformed
-//   - CentroID: unsupported in phase 1, not malformed
-//   - bare whose bit47 disagrees with bits 63-57: still NOT malformed. A bare
-//     pointer's bounds are the whole address space (ADR-0019 rev 7), so bit47
-//     no longer selects a half and nothing depends on it.
-val  boundsMalformed : Capability -> bool
-function boundsMalformed(cap : Capability) -> bool =
-  getCapForm(capToBits(cap)) == FormInvalid
 
 // Slot endpoints for exponent K: [slot_base(addr,K), slot_base(addr,K)+2^K-1].
 // The bound is an OR because the low K bits of the base are already zero.
