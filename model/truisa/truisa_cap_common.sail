@@ -305,7 +305,7 @@ enum CapPtrForm = {
 val  getCapForm : xlenbits -> CapPtrForm
 function getCapForm(ptr : xlenbits) -> CapPtrForm = {
   let tag7 : CapTagBits = getCapTagBits(ptr);
-  let nc : Int = unsigned(tag7[5 .. 0]);
+  let nc : int = unsigned(tag7[5 .. 0]);
   if      tag7 == 0b0111111 then FormPoisoned
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
@@ -352,8 +352,8 @@ function bareBaseAllowed(priv : Privilege) -> bool =
 
 // Slot endpoints for exponent K: [slot_base(addr,K), slot_base(addr,K)+2^K-1].
 // The bound is an OR because the low K bits of the base are already zero.
-val  slotBounds : (CapAddrBits, Int) -> (CapAddrBits, CapAddrBits)
-function slotBounds(addr : CapAddrBits, k : Int) -> (CapAddrBits, CapAddrBits) = {
+val  slotBounds : (CapAddrBits, int) -> (CapAddrBits, CapAddrBits)
+function slotBounds(addr : CapAddrBits, k : int) -> (CapAddrBits, CapAddrBits) = {
   let base  : CapAddrBits = getCapSlotBase(addr, to_bits(cap_nc_width, k));
   let bound : CapAddrBits = base | zero_extend(ones(k));
   (base, bound)
@@ -429,7 +429,7 @@ function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits
   if bound <_u addr then None()                      // empty request: no byte to cover
   else {
     let diff : xlenbits = zero_extend(addr) ^ zero_extend(bound);
-    let slotExp : Int = if diff == zeros() then 0 else xlen - count_leading_zeros(diff);
+    let slotExp : int = if diff == zeros() then 0 else xlen - count_leading_zeros(diff);
     Some(to_bits(cap_nc_width, slotExp))
   }
 }
@@ -471,12 +471,12 @@ function makeAlignedPtr(slotBase : CapAddrBits, n : bits(cap_nc_width)) -> Capab
 // from getCapBoundsBits, so it rejects too.
 val  setCapBounds : (Capability, CapAddrBits, bits(cap_nc_width)) -> (bool, Capability)
 function setCapBounds(parent : Capability, base : CapAddrBits, n : bits(cap_nc_width)) -> (bool, Capability) = {
-  let slotExp : Int = unsigned(n);
-  let baseInt : Int = unsigned(base);
+  let slotExp : int = unsigned(n);
+  let baseInt : int = unsigned(base);
   // SlotBase = base & ~(2^N - 1); for N >= VA the mask covers the whole field.
-  let slotBaseInt : Int = if slotExp >= truisa_va then 0
+  let slotBaseInt : int = if slotExp >= truisa_va then 0
                           else baseInt & ~(pow2(slotExp) - 1);
-  let slotEndInt  : Int = slotBaseInt + pow2(slotExp) - 1;
+  let slotEndInt  : int = slotBaseInt + pow2(slotExp) - 1;
   let newCap : Capability = makeAlignedPtr(to_bits(truisa_va, slotBaseInt), n);
   let inParent : bool = match getCapBoundsBits(parent) {
     None()             => false,
