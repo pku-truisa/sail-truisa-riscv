@@ -264,9 +264,19 @@ union clause instruction = CSUB   : (regidx, regidx, regidx)
  * insnref: csub_32bit
  * Pointer address subtraction
  *
- * csub rd, rs1, rs2
+ * csub rd, cs1, cs2
  *
- * rd is set to addr(rs1) - addr(rs2), modulo 2^XLEN.
+ * rd is set to the SIGNED address difference addr(cs1) - addr(cs2). Both
+ * operands are sign-extended from the 48-bit address field first, so a
+ * high-half address counts as negative and the difference has the right sign.
+ *
+ * ⚠️ This is deliberately NOT the zero extension used by GCBASE / GCBOUND /
+ * GCADDR. Those three return the raw 48-bit FIELD value (for Len, printing,
+ * comparing); CSUB returns a signed DISTANCE (the ptrdiff_t quantity). If the
+ * operands were zero-extended instead, a difference taken across bit VA-1
+ * would come out with the OPPOSITE SIGN and off by 2^VA. Do NOT "unify" the
+ * two -- they are different quantities, not two spellings of one.
+ *
  * Ported from CHERIoT's CSub (cheriot-sail src/cheri_insts.sail:472), with
  * C(x).address replaced by sign_extend(X(x)[47..0]) -- TruISA keeps pointers
  * in the integer register file.
