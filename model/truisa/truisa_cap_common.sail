@@ -269,13 +269,7 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
  * bit 63 = 0 is the tag 0000000, which was already classified as Bare above.
  * So any tag reaching the descriptor branch has C >= 1, as spec requires.
  */
-enum CapPtrForm = {
-  FormPoisoned,
-  FormBare,
-  FormInvalid,
-  FormDescriptor,      // reserved: no operator produces it in phase 1
-  FormAligned,
-}
+// CapPtrForm lives in truisa_types.sail (CHERI keeps its enums there too).
 
 val  getCapForm : xlenbits -> CapPtrForm
 function getCapForm(ptr : xlenbits) -> CapPtrForm = {
