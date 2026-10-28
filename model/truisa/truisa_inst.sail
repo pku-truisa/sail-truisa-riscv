@@ -85,7 +85,10 @@ union clause instruction = CADD : (regidx, regidx, regidx)
  */
 function clause execute (CADD(cd, cs1, rs2)) = {
   let cs1_val = C(cs1);
-  let rs2_val = X(rs2);
+  // The pointer delta is taken modulo 2^VA, exactly like CHERI's
+  // `cap.address + delta`: negative offsets wrap. XLEN > VA here, so the
+  // truncation is explicit -- CHERI needs none because cap_addr_width == xlen.
+  let rs2_val : CapAddrBits = X(rs2)[truisa_va - 1 .. 0];
 
   let newCap = incCapAddrChecked(cs1_val, rs2_val);
 
@@ -110,7 +113,9 @@ union clause instruction = CADDI : (regidx, regidx, bits(12))
  */
 function clause execute (CADDI(cd, cs1, imm)) = {
   let cs1_val = C(cs1);
-  let immBits : xlenbits = sign_extend(imm);
+  // sign_extend keeps a negative immediate negative; truncating to VA bits
+  // afterwards still preserves the sign, because |imm| <= 2048 << 2^(VA-1).
+  let immBits : CapAddrBits = sign_extend(imm)[truisa_va - 1 .. 0];
 
   let newCap = incCapAddrChecked(cs1_val, immBits);
 
@@ -130,7 +135,8 @@ union clause instruction = SCADDR : (regidx, regidx, regidx)
  * set to the poison code.
  */
 function clause execute (SCADDR(cd, cs1, rs2)) = {
-  C(cd) = setCapAddrChecked(C(cs1), X(rs2));
+  // rs2 is an XLEN register but an address is VA bits wide.
+  C(cd) = setCapAddrChecked(C(cs1), X(rs2)[truisa_va - 1 .. 0]);
   RETIRE_SUCCESS
 }
 
