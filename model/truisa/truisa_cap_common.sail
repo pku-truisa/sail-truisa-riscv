@@ -256,13 +256,18 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
  *   bits 63-57 = 0111111  -> poisoned
  *   bits 63-57 = 0000000  -> bare
  *   bits 63-57 = 1111111  -> bare
- * Then the mode bit splits the remaining space, BEFORE the N/C range check --
- * the check only applies to an aligned slot, where N/C really is a block
- * exponent. A descriptor's N/C field means something else (phase 2), so it must
- * not be rejected by a block-exponent range test here:
+ * The 7-bit tag is NOT enough on its own: spec/ch03 "合法性判据" splits "the
+ * rest" by bit 63 AND constrains the block exponent for BOTH branches --
+ *   aligned slot : N in 0 .. VA
+ *   descriptor   : C in 1 .. VA
+ * so the range test runs BEFORE the mode split, and it is the same test for
+ * both forms (anything above VA is an illegal code point either way):
+ *   N/C > VA              -> Invalid code point  (both forms)
+ *   bit 63 = 0, N/C = 0   -> Invalid code point  (a descriptor's C starts at 1)
  *   bit 63 = 0            -> Descriptor form (reserved for phase 2)
- *   N/C > VA              -> Invalid code point (aligned slots only)
  *   otherwise             -> Aligned slot
+ * ⚠️ The mode-dependent part is only the LOWER bound: N = 0 is a legal aligned
+ * slot (a 1-byte object) but C = 0 is not a legal descriptor.
  */
 enum CapPtrForm = {
   FormPoisoned,
@@ -275,11 +280,13 @@ enum CapPtrForm = {
 val  getCapForm : xlenbits -> CapPtrForm
 function getCapForm(ptr : xlenbits) -> CapPtrForm = {
   let tag7 : CapTagBits = getCapTagBits(ptr);
+  let nc : Int = unsigned(tag7[5 .. 0]);
   if      tag7 == 0b0111111 then FormPoisoned
   else if tag7 == 0b0000000 then FormBare
   else if tag7 == 0b1111111 then FormBare
-  else if tag7[6] == 0b0    then FormDescriptor
-  else if unsigned(tag7[5 .. 0]) > truisa_va then FormInvalid
+  else if nc > truisa_va then FormInvalid              // both forms: N/C in 0..VA
+  else if tag7[6] == 0b0 then
+    (if nc == 0 then FormInvalid else FormDescriptor)  // descriptor C in 1..VA
   else FormAligned
 }
 
