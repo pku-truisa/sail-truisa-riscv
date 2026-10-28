@@ -31,15 +31,15 @@ set(sail_common
 #     analysed one at a time in dependency order.
 # ---------------------------------------------------------------------------------
     set(truisa_cap_impl
-        "truisa_prelude_64.sail"
-        "truisa_prelude_128.sail"
-        "truisa_prelude_xlen.sail"
+        "truisa/truisa_prelude_64.sail"
+        "truisa/truisa_prelude_128.sail"
+        "truisa/truisa_prelude_xlen.sail"
     )
 
     # Instruction sources, depending on target
     set(truisa_check_srcs
         "riscv_addr_checks_common.sail"
-        "truisa_addr_checks.sail"
+        "truisa/truisa_addr_checks.sail"
     )
 
     set(truisa_vext_srcs
@@ -66,7 +66,7 @@ set(sail_common
         "riscv_insts_zicsr.sail"
         "riscv_insts_hext.sail"
         "riscv_insts_reserved_fence.sail"
-        "truisa_csr_op.sail"
+        "truisa/truisa_csr_op.sail"
         "riscv_insts_fext.sail"
         "riscv_insts_zcf.sail"
         "riscv_insts_dext.sail"
@@ -97,11 +97,11 @@ set(sail_common
         "riscv_insts_zvknhab.sail"
         "riscv_insts_zvksed.sail"
         "riscv_insts_zvksh.sail"
-        "truisa_insts_begin.sail"
-        "truisa_inst.sail"
-        "truisa_insts_cext.sail"
-        "truisa_insts_zba.sail"
-        "truisa_insts_end.sail"
+        "truisa/truisa_insts_begin.sail"
+        "truisa/truisa_inst.sail"
+        "truisa/truisa_insts_cext.sail"
+        "truisa/truisa_insts_zba.sail"
+        "truisa/truisa_insts_end.sail"
         # Zimop and Zcmop should be at the end so they can be overridden by earlier extensions
         "riscv_insts_zimop.sail"
         "riscv_insts_zcmop.sail"
@@ -112,15 +112,15 @@ set(sail_common
         "riscv_insts_begin.sail"
         ${truisa_seq_inst}
         "riscv_insts_end.sail"
-        "truisa_csr_ext.sail"
+        "truisa/truisa_csr_ext.sail"
         "riscv_csr_end.sail"
     )
 
     set(truisa_sys_srcs
         "riscv_vext_control.sail"
-        "truisa_sys_regs_access.sail"
+        "truisa/truisa_sys_regs_access.sail"
         "riscv_sys_regs_access_common.sail"
-        "truisa_sys_exceptions.sail"
+        "truisa/truisa_sys_exceptions.sail"
         "riscv_sync_exception.sail"
         "riscv_zihpm.sail"
         "riscv_sscofpmf.sail"
@@ -137,12 +137,12 @@ set(sail_common
     )
 
     set(truisa_vm_srcs
-        "truisa_vmem_ptw.sail"
+        "truisa/truisa_vmem_ptw.sail"
         "riscv_vmem_pte_types.sail"
-        "truisa_vmem_pte_types_ext.sail"
-        "truisa_vmem_pte_validity_ext.sail"
+        "truisa/truisa_vmem_pte_types_ext.sail"
+        "truisa/truisa_vmem_pte_validity_ext.sail"
         "riscv_vmem_pte.sail"
-        "truisa_vmem_pte_ext.sail"
+        "truisa/truisa_vmem_pte_ext.sail"
         "riscv_vmem_tlb.sail"
         "riscv_vmem.sail"
         "riscv_vmem_utils.sail"
@@ -156,14 +156,14 @@ set(sail_common
         "riscv_xlen.sail"
         "riscv_flen.sail"
         "riscv_vlen.sail"
-        "truisa_prelude.sail"
-        "truisa_types.sail"
+        "truisa/truisa_prelude.sail"
+        "truisa/truisa_types.sail"
         ${truisa_cap_impl}
         "prelude_mem_addrtype.sail"
-        "truisa_mem_metadata.sail"
+        "truisa/truisa_mem_metadata.sail"
         "prelude_mem.sail"
         "arithmetic.sail"
-        "truisa_cap_common.sail"
+        "truisa/truisa_cap_common.sail"
         "rvfi_dii.sail"
         "rvfi_dii_v1.sail"
         "rvfi_dii_v2.sail"
@@ -171,18 +171,18 @@ set(sail_common
 
     set(truisa_regs_srcs
         "riscv_callbacks.sail"
-        "truisa_reg_type.sail"
+        "truisa/truisa_reg_type.sail"
         "riscv_freg_type.sail"
-        "truisa_vmem_types.sail"
+        "truisa/truisa_vmem_types.sail"
         "riscv_regs.sail"
-        "truisa_sys_regs_types.sail"
-        "truisa_sys_regs_xstatus.sail"
+        "truisa/truisa_sys_regs_types.sail"
+        "truisa/truisa_sys_regs_xstatus.sail"
         "riscv_sys_regs.sail"
-        "truisa_sys_regs_envcfg.sail"
+        "truisa/truisa_sys_regs_envcfg.sail"
         "riscv_pmp_regs.sail"
         "riscv_pmp_control.sail"
-        "truisa_sys_regs.sail"
-        "truisa_regs.sail"
+        "truisa/truisa_sys_regs.sail"
+        "truisa/truisa_regs.sail"
         "riscv_pc_access.sail"
         "riscv_vreg_type.sail"
         "riscv_vext_regs.sail"
@@ -191,7 +191,7 @@ set(sail_common
     set(truisa_arch_srcs
         ${truisa_prelude}
         "riscv_types_common.sail"
-        "truisa_riscv_types.sail"
+        "truisa/truisa_riscv_types.sail"
         "riscv_extensions.sail"
         "riscv_types.sail"
         "riscv_csr_begin.sail"
@@ -202,7 +202,7 @@ set(sail_common
         ${truisa_check_srcs}
         "riscv_sstc.sail"
         "riscv_mem.sail"
-        "truisa_mem.sail"
+        "truisa/truisa_mem.sail"
         "riscv_inst_retire.sail"
         ${truisa_vm_srcs}
         # Shared/common code for the cryptography extension.
@@ -212,8 +212,8 @@ set(sail_common
 
     set(truisa_step_srcs
         "riscv_step_common.sail"
-        "truisa_step_ext.sail"
-        "truisa_decode_ext.sail"
+        "truisa/truisa_step_ext.sail"
+        "truisa/truisa_decode_ext.sail"
         "riscv_fetch_rvfi.sail"
         "riscv_fetch.sail"
         "riscv_step.sail"
