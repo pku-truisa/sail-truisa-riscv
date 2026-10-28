@@ -69,6 +69,22 @@ corresponding elements vertically aligned.
 
 ## Implementation
 
+### Identifier naming (TruISA addition)
+
+- **No bare single letters**, unless the letter is a symbol the specification
+  itself defines. Those stay exactly as the spec writes them:
+  `N` / `C` (block exponent), `L` (length), `VA`, and the field name `N/C`.
+- Everything else is spelled out: `bound` (not `b`), `base` (not `b`),
+  `cap` (not `c`), `ptr` (not `p`), `addrInt` (not `a`).
+- ⚠️ Short abbreviations that are not words are forbidden too: `bnd`, `sz`,
+  `cnt`, `len_str` is fine but `lstr` is not. Write `bound`, `size`, `count`.
+- ⚠️ One name must not carry two meanings in one file. Example of what this
+  rule prevents: `c : Capability` and `c : Int` (the block exponent) coexisting
+  in the same module.
+- Rationale: this model IS the executable form of the specification. A reader
+  who has to decode `b` cannot check the code against the prose line by line,
+  which is the only real acceptance test this model has.
+
 - Since this is the official model intended to be included as part of the
   RISC-V specifications, readability is paramount, including to those not
   already familiar with the details of that field of Computer Science (e.g.

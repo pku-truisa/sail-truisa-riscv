@@ -321,8 +321,8 @@ function getCapBoundsBits(c : Capability) -> option((CapAddrBits, CapAddrBits)) 
   let p : xlenbits = capToBits(c);
   let addr : CapAddrBits = p[47 .. 0];
   match getCapForm(p) {
-    FormBare    => { let (b, e) = slotBounds(addr, truisa_va); Some(b, e) },
-    FormAligned => { let (b, e) = slotBounds(addr, unsigned(getCapN(p))); Some(b, e) },
+    FormBare    => { let (base, bound) = slotBounds(addr, truisa_va); Some(base, bound) },
+    FormAligned => { let (base, bound) = slotBounds(addr, unsigned(getCapN(p))); Some(base, bound) },
     _           => None(),          // poisoned / invalid / CentroID (phase 1)
   }
 }
@@ -385,7 +385,7 @@ function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits
 function getCapBounds(cap : Capability) -> option((CapAddrInt, CapAddrInt)) =
   match getCapBoundsBits(cap) {
     None()        => None(),
-    Some(base, b) => Some(unsigned(base), unsigned(b))
+    Some(base, bound) => Some(unsigned(base), unsigned(bound))
   }
 
 /* An 'ideal' version of setCapBounds as described in paper. */
@@ -398,7 +398,7 @@ function setCapBounds(cap : Capability, base : CapAddrBits, top : CapLenBits) ->
   // The returned `exact` keeps CHERI's signature meaning "the request was
   // representable" -- in TruISA any request covered by some slot is
   // representable (over-coverage is normal, not an error; see
-  // spec/insns/scbnds.adoc "判据 ④ 判的是存在覆盖槽，不是槽刚好等于对象").
+  // spec/insns/scbounds.adoc "判据 ④ 判的是存在覆盖槽，不是槽刚好等于对象").
   //
   // TODO(PAC): this leaves `pac` zero. Signing is done by the instruction
   // (ADR-0005), whose operator is not implemented yet.
@@ -596,7 +596,7 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   let a = unsigned(addr);
   match getCapBounds(cap) {
     None()          => false,
-    Some(base, bnd) => (a >= base) & ((a + size - 1) <= bnd)
+    Some(base, bound) => (a >= base) & ((a + size - 1) <= bound)
   }
 }
 
@@ -606,7 +606,7 @@ function anyByteInCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenI
   let a = unsigned(addr);
   match getCapBounds(cap) {
     None() => false,
-    Some(base, bnd) => ((a <= bnd) & ((a + size) > base))
+    Some(base, bound) => ((a <= bound) & ((a + size) > base))
   }
 }
 
@@ -622,7 +622,7 @@ function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : CapLenIn
     let a = unsigned(addr);
     match getCapBounds(cap) {
       None()          => false,
-      Some(base, bnd) => (a >= base) & ((a + size - 1) <= bnd),
+      Some(base, bound) => (a >= base) & ((a + size - 1) <= bound),
     }
   }
 }
@@ -729,7 +729,7 @@ function capBoundsEqual (c1 : Capability, c2 : Capability) -> bool =
   match (getCapBounds(c1), getCapBounds(c2)) {
     (None(), _) => false,
     (_, None()) => false,
-    (Some(base1, bnd1), Some(base2, bnd2)) => (base1 == base2) & (bnd1 == bnd2)
+    (Some(base1, bound1), Some(base2, bound2)) => (base1 == base2) & (bound1 == bound2)
   }
 
 function setCapAddr(c : Capability, addr : CapAddrBits) -> (bool, Capability) = {
@@ -756,7 +756,7 @@ function incCapAddrChecked(c : Capability, delta : CapAddrBits) -> Capability =
 function capToString(cap : Capability) -> string = {
   let (base_str, top_str, bounds_malformed) : (string, string, bool) = match getCapBoundsBits(cap) {
     None() => ("0 (malformed)", "0 (malformed)", true),
-    Some(base, bnd) => (bits_str(base), bits_str(zero_extend(truisa_va, bnd)), false)
+    Some(base, bound) => (bits_str(base), bits_str(zero_extend(truisa_va, bound)), false)
   };
 
   let len_str = bits_str(to_bits_unsafe(cap_len_width + 3, getCapLength(cap)));
