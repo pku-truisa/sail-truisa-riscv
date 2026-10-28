@@ -189,11 +189,15 @@ set(truisa_common_flags
 # Type check
 # -------------------------------------------------------------------------------------
 add_custom_target(truisa_check
-    COMMENT "Type-checking the TruISA model"
+    COMMENT "Type-checking the TruISA model (via -c: --just-check does not bind xlen)"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    # ⚠️ NOT --just-check. That mode never binds xlen (it ignores --config), so
+    # every bits(<expr depending on xlen>) such as CapPacBits fails the
+    # well-formedness check with a misleading "recursive types are forbidden".
+    # Generating C with -c to /dev/null is the cheapest mode that does bind it.
     COMMAND ${SAIL_BIN} ${truisa_common_flags}
-            --just-check
-            -o /dev/null
+            --config ${CMAKE_CURRENT_SOURCE_DIR}/../../config/rv64d.json
+            -c --c-no-main -o /dev/null
             ${truisa_srcs}
     VERBATIM
 )
