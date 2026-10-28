@@ -47,6 +47,10 @@ set(truisa_upstream_srcs
     ../riscv_types_common.sail
     ../riscv_types_ext.sail
     ../riscv_types.sail
+    # TruISA core vocabulary must exist before any upstream file references
+    # Capability / setCapAddrChecked (riscv_pc_access.sail does).
+    truisa_types.sail
+    truisa_cap_common.sail
     ../riscv_extensions.sail
     ../riscv_csr_begin.sail
     ../riscv_convert_invalid_addr.sail
@@ -55,8 +59,9 @@ set(truisa_upstream_srcs
     ../riscv_freg_type.sail
     ../riscv_vmem_types.sail
     ../riscv_regs.sail
-    ../riscv_sys_regs_types.sail
     ../riscv_sys_regs_xstatus.sail
+    # sits here, not at the end, because it must precede riscv_sys_regs.sail
+    truisa_sys_regs_types.sail
     ../riscv_sys_regs.sail
     ../riscv_sys_regs_envcfg.sail
     ../riscv_pmp_regs.sail
@@ -168,8 +173,6 @@ set(truisa_upstream_srcs
 # The fork's own sources. Order matters here too:
 #   types  -> cap_common -> regs -> addr_checks -> inst
 set(truisa_own_srcs
-    truisa_types.sail
-    truisa_cap_common.sail
     truisa_regs.sail
     truisa_addr_checks.sail
     truisa_inst.sail
