@@ -13,7 +13,11 @@
 //   bits 56-48    PAC     truisa_pac_width  = ptr - VA - mode - N/C (computed)
 //   bits 47-0     address truisa_va
 // Every width below is derived from these four; no bit position is hard-coded.
-type truisa_ptr_width   : Int = xlen           // 64 on RV64 (TruISA targets RV64)
+// ⚠️ LITERAL 64, not `xlen`. Same limitation as truisa_pac_width below: Sail's
+// bit-slice quantifier cannot prove e.g. `48 <= (xlen - 2) - 6` when xlen is
+// symbolic, so bitsToCap fails with "Could not resolve quantifiers for
+// subrange_bits". TruISA targets RV64 only (ADR-0001), so the width is fixed.
+type truisa_ptr_width   : Int = 64
 let  truisa_ptr_width   = sizeof(truisa_ptr_width)
 type truisa_va          : Int = 48              // Sv48; Sv39 -> 39, Sv57 -> 57
 let  truisa_va          = sizeof(truisa_va)
@@ -41,7 +45,10 @@ let  truisa_pac_width   = sizeof(truisa_pac_width)
 // Width of capability in bytes (excluding tag).
 // TODO: Rename to clen_bytes and clen?
 // TODO: Change root xlen to be in terms of the log2 bytes.
-type cap_size : Int = xlen_bytes          // TruISA: pointer is 64-bit (CHERI used xlen_bytes * 2)
+// ⚠️ LITERAL 8 (= xlen_bytes on RV64). Keeping xlen_bytes makes every
+// cap_bits[i] index unprovable ("Could not resolve quantifiers for
+// bitvector_access"), because xlen is symbolic at type-check time.
+type cap_size : Int = 8                   // TruISA: pointer is 64-bit (CHERI used xlen_bytes * 2)
 let  cap_size = sizeof(cap_size)
 
 type cap_addr_width : Int = truisa_va          // was xlen (CHERI); TruISA uses the VA width
