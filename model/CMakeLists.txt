@@ -150,7 +150,7 @@ set(sail_common
     )
 
     set(truisa_prelude
-        "truisa_prelude.sail"
+        "prelude.sail"
         "riscv_errors.sail"
         "range_util.sail"
         "riscv_xlen.sail"
