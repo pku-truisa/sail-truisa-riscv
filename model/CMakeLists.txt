@@ -229,15 +229,6 @@ set(sail_common
         "riscv_model.sail"
     )
 
-    set(truisa_srcs
-        ${truisa_arch_srcs}
-        ${truisa_seq_inst_srcs}
-        ${truisa_step_srcs}
-        ${truisa_cfg_srcs}
-        ${truisa_model_srcs}
-        "main.sail"
-    )
-
 foreach (variant IN ITEMS "" "smt" "rocq" "rmem" "lean" "lem" "isabelle")
 
     # TruISA has no formalisation variants (no smt/rocq/lean/lem/rmem targets):
@@ -464,8 +455,18 @@ foreach (variant IN ITEMS "" "smt" "rocq" "rmem" "lean" "lem" "isabelle")
 
     # Final file list.
     if (TRUISA)
-        # Built from the truisa_* sets above, which mirror the CHERI ones one for one.
-        set(sail_srcs ${truisa_srcs})
+        # Line for line the same composition as the CHERI branch below, with the
+        # truisa_* sub-sets instead. Keeping the shape identical is the point: a
+        # reader can compare the two branches without holding a flattened list in
+        # their head, and a sub-set added on one side is visibly missing on the other.
+        set(sail_srcs
+            ${truisa_arch_srcs}
+            ${truisa_seq_inst_srcs}
+            ${truisa_step_srcs}
+            ${truisa_cfg_srcs}
+            ${truisa_model_srcs}
+            "main.sail"
+        )
     else()
         set(sail_srcs
             ${sail_arch_srcs}
