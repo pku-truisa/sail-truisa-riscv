@@ -156,10 +156,12 @@ let null_cap : Capability = struct {
 
 // Assemble the 64-bit pointer from its fields: mode | N/C | PAC | address.
 // This is the inverse of bitsToCap and the ONLY way to get the raw 64-bit
-// value out of a Capability. Needed wherever a function takes `xlenbits`
+// value out of a Capability. It returns CapBits (bits(8 * cap_size) = bits(64)),
+// NOT xlenbits: xlen is symbolic at type-check time, so declaring xlenbits here
+// would force Sail to prove 64 == xlen. Conversion happens once, in truisa_regs.sail.
 // (e.g. getCapBoundsBits) but the caller holds a Capability (from C()).
-val  capToBits : Capability -> xlenbits
-function capToBits(cap : Capability) -> xlenbits =
+val  capToBits : Capability -> CapBits
+function capToBits(cap : Capability) -> CapBits =
   cap.mode @ cap.nc @ cap.pac @ cap.address
 
 // The C() view (capability register accessors) lives in truisa_regs.sail.
@@ -168,21 +170,30 @@ function capToBits(cap : Capability) -> xlenbits =
 // off this value. Named "Bits" to match the blueprint's getCapBoundsBits.
 // Bit positions are derived, never hard-coded: the tag ends at
 // ptr_width-1 and spans (mode + N/C) bits downwards.
-val  getCapTagBits : xlenbits -> CapTagBits
-function getCapTagBits(ptr : xlenbits) -> CapTagBits =
+val  getCapTagBits : CapBits -> CapTagBits
+function getCapTagBits(ptr : CapBits) -> CapTagBits =
   ptr[truisa_ptr_width - 1 .. truisa_ptr_width - cap_mode_width - cap_nc_width]
 
 // The N/C field: the bits just below mode. Split out because both getCapForm and
 // getCapBoundsBits need it, and duplicating the slice invites bit-position drift.
-val  getCapN : xlenbits -> bits(cap_nc_width)
-function getCapN(ptr : xlenbits) -> bits(cap_nc_width) =
+val  getCapN : CapBits -> bits(cap_nc_width)
+function getCapN(ptr : CapBits) -> bits(cap_nc_width) =
   ptr[truisa_ptr_width - 2 .. truisa_ptr_width - 1 - cap_nc_width]
 
 // Slot base of an aligned-slot pointer: SlotBase = p & ~(2^N - 1)
 // (docs/isa/04; ADR-0010 decision 4). Operates inside the address field only.
 val  getCapSlotBase : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
-function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
-  p & ~(zero_extend(ones(unsigned(n))))
+function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
+  // ⚠️ Two Sail traps here:
+  //   1) `~` is boolean negation (not_bool), NOT bit-wise complement. There is no
+  //      `overload operator ~` anywhere in either model, so `~v` on a bitvector
+  //      cannot resolve. Bit complement is not_vec(), but zero_extend() then has
+  //      no target width to solve for.
+  //   2) So compute the mask arithmetically instead: ~(2^n - 1) inside a
+  //      cap_addr_width-wide field is simply 2^VA - 2^n.
+  let mask : CapAddrBits = to_bits(cap_addr_width, pow2(cap_addr_width) - pow2(unsigned(n)));
+  p & mask
+}
 
 // CentroID canonical representative point: m = SlotBase + 2^(N-1)  (ADR-0004)
 // CentroID is formally a PAIR -- left = S + 2^(N-1) - 1, right = S + 2^(N-1) --
@@ -286,8 +297,8 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
  */
 // CapPtrForm lives in truisa_types.sail (CHERI keeps its enums there too).
 
-val  getCapForm : xlenbits -> CapPtrForm
-function getCapForm(ptr : xlenbits) -> CapPtrForm = {
+val  getCapForm : CapBits -> CapPtrForm
+function getCapForm(ptr : CapBits) -> CapPtrForm = {
   let tag7 : CapTagBits = getCapTagBits(ptr);
   let nc : int = unsigned(tag7[5 .. 0]);
   if      tag7 == 0b0111111 then FormPoisoned
@@ -321,7 +332,7 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
   //
   // The form decision itself lives in getCapForm(); this function only maps a
   // usable form to endpoints.
-  let ptr : xlenbits = capToBits(cap);
+  let ptr : CapBits = capToBits(cap);
   let addr : CapAddrBits = ptr[47 .. 0];
   match getCapForm(ptr) {
     FormBare    => { let (base, bound) = slotBounds(addr, truisa_va); Some(base, bound) },

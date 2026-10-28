@@ -25,11 +25,15 @@
 
 /* Reads a given capability register. X(0) is always zero, so rC(0) is the null
    capability for free -- no special case is needed here. */
-function rC(r : regno) -> Capability = bitsToCap(false, X(r))
+// ⚠️ The cast is the single xlenbits <-> CapBits boundary in the whole model.
+// CapBits is bits(8 * cap_size) = bits(64) (a computable literal), while
+// xlenbits is bits(xlen) (symbolic), so Sail needs the conversion spelled out
+// even though both are 64 bits wide on RV64.
+function rC(r : regno) -> Capability = bitsToCap(false, truncate(X(r)))
 
 /* Writes a register with a capability value. */
 function wC (Regno(r) : regno, v : Capability) -> unit = {
-  X(Regno(r)) = capToBits(v)
+  X(Regno(r)) = zero_extend(capToBits(v))
 }
 
 function rC_bits(Regidx(i): regidx) -> Capability = rC(Regno(unsigned(i)))
