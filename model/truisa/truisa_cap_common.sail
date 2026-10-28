@@ -455,11 +455,18 @@ val  setCapBounds : (Capability, CapAddrBits, bits(cap_nc_width)) -> (bool, Capa
 function setCapBounds(parent : Capability, base : CapAddrBits, n : bits(cap_nc_width)) -> (bool, Capability) = {
   let slotExp : int = unsigned(n);
   let baseInt : int = unsigned(base);
-  // SlotBase = base & ~(2^N - 1); for N >= VA the mask covers the whole field.
-  let slotBaseInt : int = if slotExp >= truisa_va then 0
-                          else baseInt & ~(pow2(slotExp) - 1);
+  // SlotBase = base rounded down to a multiple of 2^N, done in the bitvector
+  // domain: a shift pair clears the low bits, exactly like getCapSlotBase. Sail's
+  // & and ~ have no int overload, and / needs a non-negativity proof, but a shift
+  // amount may simply be an int.
+  // The N >= VA branch is kept because a shift by the full width is undefined
+  // behaviour in the RISC-V reading Sail models.
+  let slotBaseBits : CapAddrBits =
+    if slotExp >= truisa_va then zeros()
+    else (base >> slotExp) << slotExp;
+  let slotBaseInt : int = unsigned(slotBaseBits);
   let slotEndInt  : int = slotBaseInt + pow2(slotExp) - 1;
-  let newCap : Capability = makeAlignedPtr(to_bits(truisa_va, slotBaseInt), n);
+  let newCap : Capability = makeAlignedPtr(slotBaseBits, n);
   let inParent : bool = match getCapBoundsBits(parent) {
     None()             => false,
     Some(lo, hi)       => (slotBaseInt >= unsigned(lo)) & (slotEndInt <= unsigned(hi)),
