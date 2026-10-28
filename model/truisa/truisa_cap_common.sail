@@ -406,8 +406,11 @@ function minSlotExponent(addr : CapAddrBits, bound : CapAddrBits) -> option(bits
     // XOR at the address width first (both operands are CapAddrBits, so `^`
     // resolves), then widen once -- widening each side separately leaves
     // zero_extend without a target width, which is the same trap as before.
-    let diff : xlenbits = zero_extend(addr ^ bound);
-    let slotExp : int = if diff == zeros() then 0 else xlen - count_leading_zeros(diff);
+    // bits(64), not xlenbits: widening to xlenbits requires proving 48 <= xlen,
+    // which is not provable while xlen is symbolic. 64 is the pointer width
+    // (truisa_ptr_width is a literal for the same reason).
+    let diff : bits(64) = zero_extend(addr ^ bound);
+    let slotExp : int = if diff == zeros() then 0 else 64 - count_leading_zeros(diff);
     Some(to_bits(cap_nc_width, slotExp))
   }
 }
