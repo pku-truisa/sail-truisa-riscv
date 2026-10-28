@@ -74,8 +74,6 @@ type CapLenBits   = bits(cap_len_width)
 type CapLenInt    = range(0, cap_max_len)
 
 // Capability level bits (> 1 is experimental)
-type lvlbits : Int = 1
-let lvlbits = sizeof(lvlbits)
 
 // A partially decompressed version of a capability. Note that this is a
 // losslessly decompressed version. All of the original metadata bits are
@@ -485,123 +483,6 @@ function setCapBounds(parent : Capability, base : CapAddrBits, n : bits(cap_nc_w
   (inParent, newCap)
 }
 
-function capIsSealed(cap : Capability) -> bool = cap.sealed
-
-function sealCap(cap : Capability) -> Capability =
-  {cap with sealed=true}
-
-function unsealCap(cap : Capability) -> Capability =
-  {cap with sealed=false}
-
-// A capability is malformed if it has a reserved permission encoding.
-function permsMalformed(cap : Capability) -> bool =
-  not(ap_m_valid_bits(cap.ap_m))
-
-// Utility field functions.
-
-function getCapPermsAndMode(cap : Capability) -> option((ArchPerms, ExecutionMode)) =
-  if permsMalformed(cap) then None() else Some(ap_m_decode(cap.ap_m))
-
-function setCapPermsAndMode(cap : Capability, (perms, mode): (ArchPerms, ExecutionMode)) -> Capability =
-  {cap with ap_m = ap_m_encode(legalizePermsAndMode(perms, mode))}
-
-function getArchPerms(cap : Capability) -> option(ArchPerms) =
-  match getCapPermsAndMode(cap) {
-    None() => None(),
-    Some(perms, _) => Some(perms)
-  }
-
-function getArchPermsLegalized(cap : Capability) -> ArchPerms =
-  match getArchPerms(cap) {
-    None() => null_perms,
-    Some(perms) => perms
-  }
-
-// Extract capability mode bit, legalising to integer pointer mode if decoding goes wrong
-function getCapMode(cap : Capability) -> ExecutionMode =
-  match getCapPermsAndMode(cap) {
-    None() => execution_mode_encdec(0b0),
-    Some(_, mode) => mode,
-  }
-
-function setArchPerms(cap : Capability, perms : ArchPerms) -> Capability =
-  setCapPermsAndMode(cap, (perms, getCapMode(cap)))
-
-function setCapMode(cap : Capability, mode : ExecutionMode) -> Capability =
-  setCapPermsAndMode(cap, (getArchPermsLegalized(cap), mode))
-
-function canASR(cap : Capability) -> bool = getArchPermsLegalized(cap).ASR
-function canX(cap : Capability) -> bool = getArchPermsLegalized(cap).X
-function canR(cap : Capability) -> bool = getArchPermsLegalized(cap).R
-function canW(cap : Capability) -> bool = getArchPermsLegalized(cap).W
-function canC(cap : Capability) -> bool = getArchPermsLegalized(cap).C
-function canLM(cap : Capability) -> bool = getArchPermsLegalized(cap).LM
-function canEL(cap : Capability) -> bool = getArchPermsLegalized(cap).EL
-function canSL(cap : Capability) -> bool = getArchPermsLegalized(cap).SL
-
-// Format used by GCPERM and ACPERM.
-bitfield BitPerms : xlenbits = {
-  reserved_1  : xlen - 1                   .. 19,
-  R           : 18,
-  X           : 17,
-  ASR         : 16,
-  reserved_0  : 15                         .. 6 + cap_sd_perms_width,
-  SDP         : 6 + cap_sd_perms_width - 1 .. 6,
-  C           : 5,
-  CL          : 4,
-  SL          : 3,
-  EL          : 2,
-  LM          : 1,
-  W           : 0,
-}
-
-// Convert the capability permissions into the format expected by GCPerm and ACPerm.
-function packPerms(arch_perms : ArchPerms, cap_level : bits(lvlbits), sd_perms : bits(cap_sd_perms_width)) -> BitPerms =
-  [
-    Mk_BitPerms(zeros()) with
-    SDP = sd_perms,
-    ASR = bool_bits(arch_perms.ASR),
-    X = bool_bits(arch_perms.X),
-    R = bool_bits(arch_perms.R),
-    W = bool_bits(arch_perms.W),
-    C = bool_bits(arch_perms.C),
-    LM = bool_bits(arch_perms.LM),
-    SL = bool_bits(arch_perms.SL),
-    EL = bool_bits(arch_perms.EL),
-    CL = cap_level,
-  ]
-
-function unpackPerms(perms : BitPerms) -> (ArchPerms, bits(lvlbits), bits(cap_sd_perms_width)) = {
-  let arch_perms : ArchPerms =
-    struct {
-      ASR = bool_bits(perms[ASR]),
-      X = bool_bits(perms[X]),
-      R = bool_bits(perms[R]),
-      W = bool_bits(perms[W]),
-      C = bool_bits(perms[C]),
-      LM = bool_bits(perms[LM]),
-      SL = bool_bits(perms[SL]),
-      EL = bool_bits(perms[EL]),
-    };
-  (arch_perms, perms[CL], perms[SDP])
-}
-
-// NOTE(ADR-0019 rev 7 + ADR-0026): a bare pointer now covers the WHOLE
-// address space (K = VA, SlotBase = 0, bound = 2^VA - 1), so Len = 2^VA for
-// it. The formula below still needs no special case -- base = 0 and
-// bound = 2^VA - 1 make it fall out. (The old premise "no pointer spans the
-// whole space" is withdrawn.)
-
-// Return true if the range [addr, addr+size) is in the cap bounds.
-// The upper bound arithmetic is allowed to overflow, wrapping the address space.
-// `top` can be >= 2^xlen, in which case the entire address space is in bounds
-// provided `base == 0`. RISC-V allows accesses to wrap, so for example if
-// `addr` is 2^xlen - 2 and `size` is 4 then it will access the two highest
-// bytes and the two lowest bytes. The only situation in which a wrapped
-// access is in bounds is if the highest and lowest bytes are in bounds of the
-// unwrapped capability bounds, and that can only happen if `base` is 0 and
-// `top` is >=2^xlen (in which case every access is in bounds so we don't need
-// to check `addr` or `size` at all.
 function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
   // --- TruISA guards (D-37). These MUST run before any interval comparison. ---
   // size = 0     : an empty interval contains no byte. If instead one computed
@@ -664,10 +545,6 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
   poisonIf(newCap, not(representable))
 }
 
-infix 1 >>_s
-overload operator >> = {sail_shiftright}
-overload operator << = {sail_shiftleft}
-overload operator >>_s = {sail_arith_shiftright}
 
 function incCapAddrChecked(cap : Capability, delta : CapAddrBits) -> Capability =
   setCapAddrChecked(cap, cap.address + delta)
