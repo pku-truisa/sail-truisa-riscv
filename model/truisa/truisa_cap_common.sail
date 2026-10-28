@@ -602,12 +602,6 @@ function inCapBounds(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> 
   }
 }
 
-function capReservedValid(cap : Capability) -> bool =
-  (cap.reserved_0 == zeros()) & (cap.reserved_1 == zeros())
-
-function capTaggedAndReservedValid(cap : Capability) -> bool =
-  cap.tag & capReservedValid(cap)
-
 function capBoundsEqual (c1 : Capability, c2 : Capability) -> bool =
   match (getCapBounds(c1), getCapBounds(c2)) {
     (None(), _) => false,
