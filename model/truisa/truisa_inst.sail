@@ -162,40 +162,17 @@ union clause instruction = SCBNDSI : (regidx, regidx, bits(9))
 //   imm[8]   = 0, imm[7:0] != 0     -> imm[7:0]                  (1..255, bytes)
 //   imm[8]   = 1, imm[7:5] = 0      -> 256 | imm[3:0]<<4 | imm[4]<<3   (256..504, step 8)
 //   otherwise                       -> imm[7:0] << 4             (512..4080, step 16)
-// NOTE: the spec's third row is written as `256 | (imm[3:0] << 4) | (imm[4] << 3)`
-//       while its prose says "256-504, step 8"; those two do not agree
-//       (the formula tops out at 392). Implemented literally below; flagged
-//       for the architecture group.
-val  decode_scbndsi_imm : bits(9) -> xlenbits
-function decode_scbndsi_imm(imm : bits(9)) -> xlenbits = {
-  if imm == zeros() then
-    zero_extend(to_bits(12, 4096))
-  else if imm[8] == 0b0 then
-    zero_extend(imm[7 .. 0])
-  else if imm[7 .. 5] == 0b000 then
-    zero_extend(to_bits(12, 256)) +
-      (zero_extend(imm[3 .. 0]) << 4) +
-      (zero_extend(imm[4]) << 3)
-  else
-    zero_extend(imm[7 .. 0]) << 4
-}
-
 function clause execute (SCBNDSI(cd, cs1, imm)) = {
   let cs1_val = C(cs1);
-  let length : xlenbits = decode_scbndsi_imm(imm);
-  let newBase = cs1_val.address;
-  let newTop : CapLenBits = zero_extend(newBase) + zero_extend(length);
-  // (3) the source interval must contain the request
-  // TODO(G2): inCapBoundsNoWrap still uses CHERI's top-based half-open test.
-  let inBounds = inCapBoundsNoWrap(cs1_val, newBase, unsigned(length));
-  // (4) a covering slot must exist (exact = "representable", over-coverage is OK)
-  let (exact, newCap) = setCapBounds(cs1_val, newBase, newTop);
-  // Poison instead of trap (spec/insns/scbnds.adoc "异常"):
-  //   (1) L = 0   (2) poisoned source   (3) not in bounds   (4) no covering slot
-  let cond = (length == zeros()) |
-             ((cs1_val.mode == 0b0) & (cs1_val.nc == 0b111111)) |
-             not(inBounds) | not(exact);
-  C(cd) = poisonIf(newCap, cond);
+  // ADR-0028: the immediate IS the slot exponent N, not a length.
+  let nbits : bits(cap_nc_width) = imm[cap_nc_width - 1 .. 0];
+  // Criterion (3): high bits must be zero -- fail loud. Silently ignoring them
+  // is exactly how an old "length" operand would sneak through.
+  let hi_ok : bool = imm[8 .. cap_nc_width] == zeros();
+  // Criteria (1)(2)(4) live in setCapBounds: form + N <= VA (via monotonicity)
+  // + slot inside the parent's checked interval.
+  let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address, nbits);
+  C(cd) = poisonIf(newCap, not(hi_ok) | not(inParent));
   RETIRE_SUCCESS
 }
 
@@ -217,19 +194,13 @@ union clause instruction = SCBNDS : (regidx, regidx, regidx)
  */
 function clause execute (SCBNDS(cd, cs1, rs2)) = {
   let cs1_val = C(cs1);
-  let length : xlenbits = X(rs2);
-  let newBase = cs1_val.address;
-  let newTop : CapLenBits = zero_extend(newBase) + zero_extend(length);
-  // (3) the source interval must contain the request
-  // TODO(G2): inCapBoundsNoWrap still uses CHERI's top-based half-open test.
-  let inBounds = inCapBoundsNoWrap(cs1_val, newBase, unsigned(length));
-  // (4) a covering slot must exist
-  let (exact, newCap) = setCapBounds(cs1_val, newBase, newTop);
-  // Poison instead of trap; same four conditions as SCBNDSI.
-  let cond = (length == zeros()) |
-             ((cs1_val.mode == 0b0) & (cs1_val.nc == 0b111111)) |
-             not(inBounds) | not(exact);
-  C(cd) = poisonIf(newCap, cond);
+  let rs2_val = X(rs2);
+  // ADR-0028: rs2[5:0] IS the slot exponent N, not a length.
+  let nbits : bits(cap_nc_width) = rs2_val[cap_nc_width - 1 .. 0];
+  // Criterion (3): everything above N must be zero -- fail loud.
+  let hi_ok : bool = rs2_val[xlen - 1 .. cap_nc_width] == zeros();
+  let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address, nbits);
+  C(cd) = poisonIf(newCap, not(hi_ok) | not(inParent));
   RETIRE_SUCCESS
 }
 

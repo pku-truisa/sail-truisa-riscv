@@ -406,37 +406,42 @@ function getCapBounds(cap : Capability) -> option((CapAddrInt, CapAddrInt)) =
   }
 
 /* An 'ideal' version of setCapBounds as described in paper. */
-function setCapBounds(cap : Capability, base : CapAddrBits, top : CapLenBits) -> (bool, Capability) = {
-  // TruISA has NO compressed bounds (no E/B/T). Setting bounds means:
-  //   address = base, mode = 1 (aligned slot), nc = N_c,
-  // where N_c is the smallest exponent whose slot covers [base, top).
-  // `top` is the exclusive upper bound, so callers pass base + L.
-  //
-  // The returned `exact` keeps CHERI's signature meaning "the request was
-  // representable" -- in TruISA any request covered by some slot is
-  // representable (over-coverage is normal, not an error; see
-  // spec/insns/scbounds.adoc "判据 ④ 判的是存在覆盖槽，不是槽刚好等于对象").
-  //
-  // TODO(PAC): this leaves `pac` zero. Signing is done by the instruction
-  // (ADR-0005), whose operator is not implemented yet.
-  // `top` stays EXCLUSIVE at this boundary because L = 0 has to be rejected
-  // before subtracting 1 (base + 0 - 1 would wrap). Below, the leaf operator
-  // takes the CLOSED bound, so the single exclusive->closed conversion in the
-  // whole model happens right here.
-  if top <= zero_extend(base) then (false, cap)
-  else if top > (2 ^ truisa_va) then (false, cap)
-  else {
-    let bound : CapAddrBits = (top - 1)[truisa_va - 1 .. 0];
-    match minSlotExponent(base, bound) {
-      None()  => (false, cap),
-      Some(n) => (true, struct {
-        mode    = 0b1,
-        nc      = n,
-        pac     = zeros(),
-        address = base,
-      })
-    }
+// Build an aligned capability for the slot 2^N that contains `base`. The slot
+// base is passed in already computed: turning N into an address has to be done
+// in Int, because N is 6 bits and may exceed VA (where 2^N - 1 covers the whole
+// address field and getCapSlotBase's ones(N) would not be expressible).
+val  makeAlignedPtr : (CapAddrBits, bits(cap_nc_width)) -> Capability
+function makeAlignedPtr(slotBase : CapAddrBits, n : bits(cap_nc_width)) -> Capability =
+  struct {
+    mode    = 0b1,
+    nc      = n,
+    pac     = zeros(),                 // TODO(PAC): signing is done by the instruction
+    address = slotBase,
   }
+
+// Derive a child capability: the slot 2^N containing `base`, returned together
+// with whether that slot lies INSIDE the parent's checked interval -- the
+// monotonicity condition of ADR-0013 (a derived capability may only narrow).
+//
+// ⭐ No top and no L (ADR-0028): the caller supplies N. Everything is computed
+// in Int, which is exactly why an explicit "N <= VA" test is unnecessary: for
+// N > VA the slot end exceeds any parent's hi, so the monotonicity check
+// rejects it on its own. A parent that is poisoned / invalid answers None()
+// from getCapBoundsBits, so it rejects too.
+val  setCapBounds : (Capability, CapAddrBits, bits(cap_nc_width)) -> (bool, Capability)
+function setCapBounds(parent : Capability, base : CapAddrBits, n : bits(cap_nc_width)) -> (bool, Capability) = {
+  let slotExp : Int = unsigned(n);
+  let baseInt : Int = unsigned(base);
+  // SlotBase = base & ~(2^N - 1); for N >= VA the mask covers the whole field.
+  let slotBaseInt : Int = if slotExp >= truisa_va then 0
+                          else baseInt & ~(pow2(slotExp) - 1);
+  let slotEndInt  : Int = slotBaseInt + pow2(slotExp) - 1;
+  let newCap : Capability = makeAlignedPtr(to_bits(truisa_va, slotBaseInt), n);
+  let inParent : bool = match getCapBoundsBits(parent) {
+    None()             => false,
+    Some(lo, hi)       => (slotBaseInt >= unsigned(lo)) & (slotEndInt <= unsigned(hi)),
+  };
+  (inParent, newCap)
 }
 
 function capIsSealed(cap : Capability) -> bool = cap.sealed
