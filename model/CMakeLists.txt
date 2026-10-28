@@ -17,7 +17,20 @@ set(sail_common
     --require-version ${SAIL_REQUIRED_VER}
 )
 
+# TruISA fork: load its file chain as data. The chain lives in its own file so
+# that this 688-line script keeps owning the targets -- target names and the
+# generated sail_riscv_model.c/.h stay unchanged, so c_emulator/ needs no edits.
+if (TRUISA)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/truisa/files.cmake)
+endif()
+
 foreach (variant IN ITEMS "" "smt" "rocq" "rmem" "lean" "lem" "isabelle")
+
+    # TruISA has no formalisation variants (no smt/rocq/lean/lem/rmem targets):
+    # only the plain "" variant, which generates the C model, is meaningful.
+    if (TRUISA AND NOT variant STREQUAL "")
+        continue()
+    endif()
 
     set(cheri_cap_impl
         "cheri/cheri_prelude_64.sail"
@@ -236,14 +249,21 @@ foreach (variant IN ITEMS "" "smt" "rocq" "rmem" "lean" "lem" "isabelle")
     )
 
     # Final file list.
-    set(sail_srcs
-        ${sail_arch_srcs}
-        ${sail_seq_inst_srcs}
-        ${sail_step_srcs}
-        ${sail_cfg_srcs}
-        ${sail_model_srcs}
-        "main.sail"
-    )
+    if (TRUISA)
+        # The fork's chain, from truisa/files.cmake. It already contains the
+        # upstream riscv_* files in dependency order plus the truisa_* ones, and
+        # no cheri/* entry.
+        set(sail_srcs ${truisa_srcs})
+    else()
+        set(sail_srcs
+            ${sail_arch_srcs}
+            ${sail_seq_inst_srcs}
+            ${sail_step_srcs}
+            ${sail_cfg_srcs}
+            ${sail_model_srcs}
+            "main.sail"
+        )
+    endif()
 
     # Generate C code from Sail model
     if (NOT variant)

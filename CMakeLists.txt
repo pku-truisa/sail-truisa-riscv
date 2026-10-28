@@ -84,6 +84,13 @@ endif()
 # These are the main requirements.
 # Don't use `REQUIRED` so that we can print custom help messages.
 option(DOWNLOAD_GMP "Download libgmp and build the library locally instead of using a system installation" OFF)
+
+# Build the TruISA fork instead of the CHERI model. The two share the whole
+# upstream RISC-V tree and differ only in which file chain model/CMakeLists.txt
+# lists: CHERI pulls in cheri/*.sail, TruISA pulls in model/truisa/*.sail and
+# none of cheri/. See model/truisa/README.md and the "Fork rule" in
+# CODE_STYLE.md. Default OFF keeps the CHERI baseline building exactly as before.
+option(TRUISA "Build the TruISA fork instead of the CHERI model" OFF)
 if (DOWNLOAD_GMP)
     include(ExternalProject)
     ExternalProject_Add(
