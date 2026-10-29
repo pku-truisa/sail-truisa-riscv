@@ -125,7 +125,7 @@ function capchecktype_code(ty : CapCheckType) -> bits(4) =
  *                                                   (ADR-0011 decision 1) and lives in
  *                                                   truisa_addr_checks.sail as ExecTier.
  *   ArchPerms + null_perms (blueprint :80-91)     -- zero users in riscv_*.sail; all 7
- *                                                   users are inside cheri/*.
+ *                                                   users are inside cheri/ (the whole directory).
  *
  * ExecutionMode's SEMANTICS stay (two tiers, ADR-0011 decision 1); only the TYPE goes.
  * If some place genuinely needs a type, use a TruISA-owned name (ExecTier), not
