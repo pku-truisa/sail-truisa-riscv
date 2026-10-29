@@ -223,11 +223,24 @@ function getCapSlotBase(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBi
  * canonical, so one address carries all of (N, S). NOTE: this returns an ADDRESS, not a
  * key -- the descriptor table is keyed by (C, S), never by m (ADR-0004).
  *
- * Two inputs return the reserved value 0 rather than a number:
- *   - N = 0: 1-byte slot, S + 2^(-1) is not an integer; there is no midline.
- *   - N = VA: whole-space slot (ADR-0026), S = 0 and 2^(VA-1) is the midline of the
- *     entire space, which no object can own; ADR-0026 makes it 0.
- * Both must be INDEXED as a miss by the table path, never as "the entry at address 0".
+ * The two ends of the range, and they are NOT the same kind of thing (D-108):
+ *
+ *   - N = 0: ONE-BYTE slot. spec/ch04:239-244 defines m = S + (K == 0 ? 0 : 2^(K-1)),
+ *     i.e. m = S -- "the slot's midline is its only address". This is a DEFINITION,
+ *     not a fallback. ⚠️ So m = 0 is reachable here: a one-byte slot at address 0
+ *     returns 0, and that is a legal value, not a reserved one.
+ *   - N = VA: whole-space slot. ADR-0026 RULES m = 0 (S = 0 and no object can own the
+ *     midline of the entire space). This one really is "ruled to be 0".
+ *
+ * ⛔ Do NOT call 0 a "reserved value" without naming which case. The earlier text said
+ * "both return the reserved value 0" and that word hid a gap inside a definition: the
+ * N = VA zero is a RULING (ADR-0026), the N = 0 zero was the model saying "cannot
+ * compute a midline". D-108 withdrew the shared term for exactly this reason.
+ *
+ * ⚠️ ⛔ This is why "1B does not enter the table" (ADR-0006) must stay a HARD
+ * precondition, not a convenience: with m = S here, an entry keyed on m = 0 would
+ * collide with address 0. The two conclusions are a matched pair -- relax either and
+ * the other breaks. (ADR-0006 is a TABLE-side statement; it does not define m.)
  *
  * ⚠️ 2^(N-1) is computed as (1 << N) >> 1 in a 64-bit intermediate: (1 << (N-1)) would
  * need a proof that N >= 1, which Sail cannot get out of the compared-equal branch, and
@@ -235,12 +248,20 @@ function getCapSlotBase(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBi
  * ---------------------------------------------------------------------------------- */
 val  getCapCentroID : (CapAddrBits, bits(truisa_nc_width)) -> CapAddrBits
 function getCapCentroID(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBits = {
-  let k : int = unsigned(n);
+  // ⚠️ k must be nat, not int. Written as int (unsigned(n) coerced) Sail cannot prove
+  // `k >= 0` and rejects the shift with "Could not resolve quantifiers for shiftl".
+  // getCapSlotBase gets away with it only because it inlines unsigned(n) at the shift,
+  // where the non-negativity is still visible.
+  let k : nat = unsigned(n);
   let base : CapAddrBits = getCapSlotBase(p, n);
-  if k == 0 | k == truisa_address_width then zeros()
+  if k == 0 then base
+  else if k == truisa_address_width then zeros()
   else {
     let twop : bits(64) = 0x0000_0000_0000_0001 << k;
-    base + truncate(twop >> 1)
+    // ⚠️ truncate takes TWO arguments in Sail: the value and the target width
+    // (bitvector('n), int('m)). One-argument form fails to resolve.
+    let half : CapAddrBits = truncate(twop >> 1, truisa_address_width);
+    base + half
   }
 }
 
@@ -365,16 +386,15 @@ type cap_salt = bits(32)
  * S and m come from 1a-6 and 1a-7. They are NOT recomputed here: the whole reason those
  * two exist is that the slice arithmetic has to live in one place.
  *
- * ⚠️ KNOWN DISCREPANCY, needs an architecture ruling -- N = 0:
- *     spec/ch04 line 239 writes  m = S + (K == 0 ? 0 : 2^(K-1)), i.e. for a one-byte
- *     slot m becomes S (the byte's own address).
- *     1a-7 (CR-MAC-01 Rev.1) instead returns the RESERVED value 0 for N = 0, because a
- *     one-byte slot never enters the descriptor table ("1B not in table", ADR-0006).
- *   The two agree for the TABLE KEY (where N = 0 is a miss either way) but differ for
- *   the MAC INPUT of a one-byte ALIGNED object: this function signs m = 0 where the
- *   spec says m = S. Consequence: one-byte aligned objects get a PAC that spec-derived
- *   hardware would not reproduce. Flagged rather than silently picked -- CR-MAC-01
- *   Rev.1 says to use 1a-7, so 1a-7 is what is used.
+ * ⚠️ N = 0 (one-byte slot) -- RESOLVED by D-108, ruling 甲:
+ *     spec/ch04:239 writes m = S + (K == 0 ? 0 : 2^(K-1)), i.e. m = S for a one-byte
+ *     slot, and :244 says so in words ("the slot's midline is its only address").
+ *     This model used to return 0 there (1a-7 as first written); it now returns S, so
+ *     the MAC input matches what spec-derived hardware computes.
+ *   ⚠️ Consequence to keep in view: m = 0 is now REACHABLE (a one-byte slot at address
+ *   0). "1B does not enter the table" (ADR-0006) is what keeps that harmless -- it is a
+ *   hard precondition, not an optimisation (see 1a-7).
+ *   ⚠️ N = VA still returns 0, but that one is an ADR-0026 RULING, not a gap.
  * ---------------------------------------------------------------------------------- */
 val  signPtr : (Capability, cap_salt) -> Capability
 function signPtr(cap : Capability, salt : cap_salt) -> Capability = {

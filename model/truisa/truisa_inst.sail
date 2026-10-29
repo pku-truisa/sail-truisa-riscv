@@ -165,10 +165,10 @@ union clause instruction = SCBNDSI : (regidx, regidx, bits(9))
 function clause execute (SCBNDSI(cd, cs1, imm)) = {
   let cs1_val = C(cs1);
   // ADR-0028: the immediate IS the slot exponent N, not a length.
-  let nbits : bits(cap_nc_width) = imm[cap_nc_width - 1 .. 0];
+  let nbits : bits(truisa_nc_width) = imm[truisa_nc_width - 1 .. 0];
   // Criterion (3): high bits must be zero -- fail loud. Silently ignoring them
   // is exactly how an old "length" operand would sneak through.
-  let hi_ok : bool = imm[8 .. cap_nc_width] == zeros();
+  let hi_ok : bool = imm[8 .. truisa_nc_width] == zeros();
   // Criteria (1)(2)(4) live in setCapBounds: form + N <= VA (via monotonicity)
   // + slot inside the parent's checked interval.
   let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address, nbits);
@@ -196,9 +196,9 @@ function clause execute (SCBNDS(cd, cs1, rs2)) = {
   let cs1_val = C(cs1);
   let rs2_val = X(rs2);
   // ADR-0028: rs2[5:0] IS the slot exponent N, not a length.
-  let nbits : bits(cap_nc_width) = rs2_val[cap_nc_width - 1 .. 0];
+  let nbits : bits(truisa_nc_width) = rs2_val[truisa_nc_width - 1 .. 0];
   // Criterion (3): everything above N must be zero -- fail loud.
-  let hi_ok : bool = rs2_val[xlen - 1 .. cap_nc_width] == zeros();
+  let hi_ok : bool = rs2_val[xlen - 1 .. truisa_nc_width] == zeros();
   let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address, nbits);
   C(cd) = poisonIf(newCap, not(hi_ok) | not(inParent));
   RETIRE_SUCCESS
