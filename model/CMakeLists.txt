@@ -222,7 +222,12 @@ set(sail_common
         "riscv_pmp_control.sail"
         "truisa/truisa_sys_regs.sail"
         "truisa/truisa_regs.sail"
-        "riscv_pc_access.sail"
+        # NOT riscv_pc_access.sail: the fork patched that shared base file in place,
+        # adding PCC / nextPCC / set_next_pcc / force_pc. TruISA has no PC capability
+        # (ADR-0011 decision 2) and none of those four has a reader or caller, so this
+        # position carries a TruISA replacement that drops them. This is an EXCEPTION to
+        # the one-file-per-mirror rule -- cheri/ has no cheri_pc_access.sail to mirror.
+        "truisa/truisa_pc_access.sail"
         "riscv_vreg_type.sail"
         "riscv_vext_regs.sail"
     )
