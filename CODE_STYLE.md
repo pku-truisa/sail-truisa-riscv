@@ -105,6 +105,22 @@ point neither model can be checked on its own.
    "file responsibility table" that is inferred from names has already produced
    one wrong refactor.
 
+7. **CMake source order is load-bearing for ordinary functions.** Sail resolves
+   cross-file names in file order, so where a TruISA file sits relative to the
+   base file it talks to is part of its meaning. Three cases, and they do not
+   agree with each other:
+
+   | Relationship | Order | Example |
+   |---|---|---|
+   | **Override** -- the TruISA file redefines something the base already defines | TruISA file **after** the base (last wins) | `truisa_sys_regs.sail` after `riscv_sys_regs.sail` |
+   | **Supply** -- the base *calls* something nothing defines | TruISA file **before** the base | `truisa_sys_regs_access.sail` before `riscv_sys_regs_access.sail` (it supplies `read_stvec_utvec`) |
+   | **Scattered clause** -- `is_CSR_defined`, `csr_name_map` | anywhere, but between `riscv_csr_begin.sail` and `riscv_csr_end.sail` | `truisa_csr_ext.sail` next to `riscv_csr_end.sail` |
+
+   ⚠️ Measured, not inferred: with the supply file placed *after* its consumer the
+   build stops at `Function read_stvec_utvec not found` even though the
+   definition is in the chain. The general rule "a swap keeps its position" is
+   therefore only true for same-position replacement.
+
 ### Identifier naming (TruISA addition)
 
 - **No bare single letters**, unless the letter is a symbol the specification
