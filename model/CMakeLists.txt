@@ -112,6 +112,23 @@ set(sail_common
     )
 
 
+    # The TruISA counterpart of the CHERI branch's `if (variant STREQUAL "rmem") ...
+    # set(sail_seq_inst ...)`. Without it ${truisa_seq_inst} below is undefined, CMake
+    # expands it to nothing, and the whole instruction group (truisa_default_inst) never
+    # reaches sail -- silently, with no error. Found by reading the generated build.make
+    # rather than by any compiler message (reported in the dev reply of 2026-10-29).
+    #
+    # No variant branch here, deliberately: this block sits ABOVE the
+    # `foreach (variant IN ITEMS ...)`, so `variant` is not defined yet, and TruISA skips
+    # every non-empty variant anyway (see the TRUISA continue() inside that loop). Only
+    # the plain "" variant is built, so only riscv_jalr_seq.sail applies -- copying
+    # CHERI's rmem branch would reference an undefined variable and pick the else() arm
+    # by accident, which is the very failure mode this block is fixing.
+    set(truisa_seq_inst
+        ${truisa_default_inst}
+        "riscv_jalr_seq.sail"
+    )
+
     set(truisa_seq_inst_srcs
         "riscv_insts_begin.sail"
         ${truisa_seq_inst}
