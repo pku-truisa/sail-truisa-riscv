@@ -31,8 +31,12 @@ set(sail_common
 #     analysed one at a time in dependency order.
 # ---------------------------------------------------------------------------------
     set(truisa_cap_impl
+        # 64-bit capability (RV64) -- counterpart of cheri_prelude_128.sail, NOT _64:
+        # CHERI's _64 is the RV32 case. See the header of truisa_prelude_64.sail.
         "truisa/truisa_prelude_64.sail"
-        "truisa/truisa_prelude_128.sail"
+        # 32-bit capability (RV32) -- no CHERI counterpart; replaces the deleted _128
+        # in place, so the list keeps three entries.
+        "truisa/truisa_prelude_32.sail"
         "truisa/truisa_prelude_xlen.sail"
     )
 
