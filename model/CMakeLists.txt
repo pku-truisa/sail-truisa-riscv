@@ -120,10 +120,17 @@ set(sail_common
     #
     # No variant branch here, deliberately: this block sits ABOVE the
     # `foreach (variant IN ITEMS ...)`, so `variant` is not defined yet, and TruISA skips
-    # every non-empty variant anyway (see the TRUISA continue() inside that loop). Only
-    # the plain "" variant is built, so only riscv_jalr_seq.sail applies -- copying
-    # CHERI's rmem branch would reference an undefined variable and pick the else() arm
-    # by accident, which is the very failure mode this block is fixing.
+    # every non-empty variant anyway. Only the plain "" variant is built, so only
+    # riscv_jalr_seq.sail applies -- copying CHERI's rmem branch would reference an
+    # undefined variable and pick the else() arm by accident, which is the very failure
+    # mode this block is fixing.
+    #
+    # ⚠️ LOAD-BEARING PRECONDITION: the continue() for non-empty variants inside that
+    # foreach. If TruISA ever builds a non-empty variant, this block AND CHERI's
+    # sail_seq_inst would both take effect, putting riscv_jalr_seq.sail into the source
+    # list twice ("already defined"). If that day comes, BOTH branches must be reworked
+    # so the TruISA side owns sail_seq_inst outright -- do not relax the continue() on
+    # its own. (No line numbers on purpose: they drift, see D-115.)
     set(truisa_seq_inst
         ${truisa_default_inst}
         "riscv_jalr_seq.sail"
