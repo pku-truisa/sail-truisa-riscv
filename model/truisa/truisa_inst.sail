@@ -279,17 +279,31 @@ function clause execute (CSUB(rd, cs1, cs2)) = {
 
 /* Two arg */
 
-mapping clause encdec = GCBASE(rd, cs1)                                          if cheri_registers_enabled()
-  <-> 0b0001000 @ 0b00101 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
-mapping clause encdec = GCADDR(rd, cs1)                                           if cheri_registers_enabled()
-  <-> 0b0001000 @ 0b01001 @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
-mapping clause encdec = CSUB(rd, cs1, cs2)                                        if cheri_registers_enabled()
-  <-> 0b0001100 @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
-mapping clause encdec = GCBOUND(rd, cs1)                                          if cheri_registers_enabled()
-  <-> 0b0001000 @ 0b01010 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
+/* ⚠️ TRUISA DELTA: none of the encdec clauses below carry CHERI's
+ * `if cheri_registers_enabled()` guard. The guard is a HYBRID-mode artefact: it stops
+ * CHERI instructions from decoding on a core where CHERI is switched off. TruISA has no
+ * hybrid mode (ADR-0011: the pointer model follows the privilege level, there is no
+ * enable bit and no CSR switch), so the predicate has no TruISA counterpart and the
+ * instructions are unconditionally decodable. Deleting the guard is therefore the
+ * faithful translation, not a relaxation -- and it drops one CHERI-only name from this
+ * file's dependency list (the others are a separate item, not solved by this change).
+ *
+ * CADD keeps its real discriminator, `(rs2 != zreg)`, which is architectural.
+ *
+ * ⛔ If a hybrid mode is ever introduced, every clause here needs the guard back
+ * (architecture group, 2026-10-29, ruling (c) on the dev reply 16). */
 
-mapping clause encdec = CMV(cd, cs1)                                             if cheri_registers_enabled()
-  <-> 0b0000110 @ 0b00000 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011 if cheri_registers_enabled()
+mapping clause encdec = GCBASE(rd, cs1)
+  <-> 0b0001000 @ 0b00101 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
+mapping clause encdec = GCADDR(rd, cs1)
+  <-> 0b0001000 @ 0b01001 @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
+mapping clause encdec = CSUB(rd, cs1, cs2)
+  <-> 0b0001100 @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
+mapping clause encdec = GCBOUND(rd, cs1)
+  <-> 0b0001000 @ 0b01010 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
+
+mapping clause encdec = CMV(cd, cs1)
+  <-> 0b0000110 @ 0b00000 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011
 
 mapping clause assembly = GCBASE(rd, cs1) <-> "gcbase" ^ spc() ^ reg_name(rd)     ^ sep() ^ cap_reg_name(cs1)
 mapping clause assembly = GCADDR(rd, cs1) <-> "gcaddr" ^ spc() ^ reg_name(rd)     ^ sep() ^ cap_reg_name(cs1)
@@ -300,20 +314,20 @@ mapping clause assembly = CMV(cd, cs1)    <-> "cmv"    ^ spc() ^ cap_reg_name(cd
 
 /* Three arg */
 
-mapping clause encdec = SCADDR(cd, cs1, rs2)                                             if cheri_registers_enabled()
-  <-> 0b0000110 @ encdec_reg(rs2) @ encdec_reg(cs1) @ 0b001 @ encdec_reg(cd) @ 0b0110011 if cheri_registers_enabled()
-mapping clause encdec = CADD(cd, cs1, rs2)                                               if cheri_registers_enabled() & (rs2 != zreg)
-  <-> 0b0000110 @ encdec_reg(rs2) @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011 if cheri_registers_enabled() & (rs2 != zreg)
-mapping clause encdec = SCBNDS(cd, cs1, rs2)                                             if cheri_registers_enabled()
-  <-> 0b0000111 @ encdec_reg(rs2) @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011 if cheri_registers_enabled()
+mapping clause encdec = SCADDR(cd, cs1, rs2)
+  <-> 0b0000110 @ encdec_reg(rs2) @ encdec_reg(cs1) @ 0b001 @ encdec_reg(cd) @ 0b0110011
+mapping clause encdec = CADD(cd, cs1, rs2)                                               if (rs2 != zreg)
+  <-> 0b0000110 @ encdec_reg(rs2) @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011 if (rs2 != zreg)
+mapping clause encdec = SCBNDS(cd, cs1, rs2)
+  <-> 0b0000111 @ encdec_reg(rs2) @ encdec_reg(cs1) @ 0b000 @ encdec_reg(cd) @ 0b0110011
 
-mapping clause encdec = SCEQ(rd, cs1, cs2)                                               if cheri_registers_enabled()
-  <-> 0b0000110 @ encdec_reg(cs2) @ encdec_reg(cs1) @ 0b100 @ encdec_reg(rd) @ 0b0110011 if cheri_registers_enabled()
+mapping clause encdec = SCEQ(rd, cs1, cs2)
+  <-> 0b0000110 @ encdec_reg(cs2) @ encdec_reg(cs1) @ 0b100 @ encdec_reg(rd) @ 0b0110011
 
-mapping clause encdec = CADDI(cd, cs1, imm12)                                 if cheri_registers_enabled()
-  <-> imm12 : bits(12) @ encdec_reg(cs1) @ 0b010 @ encdec_reg(cd) @ 0b0011011 if cheri_registers_enabled()
-mapping clause encdec = SCBNDSI(cd, cs1, imm)                                    if cheri_registers_enabled()
-  <-> 0b111 @ imm : bits(9) @ encdec_reg(cs1) @ 0b101 @ encdec_reg(cd) @ 0b0010011 if cheri_registers_enabled()
+mapping clause encdec = CADDI(cd, cs1, imm12)
+  <-> imm12 : bits(12) @ encdec_reg(cs1) @ 0b010 @ encdec_reg(cd) @ 0b0011011
+mapping clause encdec = SCBNDSI(cd, cs1, imm)
+  <-> 0b111 @ imm : bits(9) @ encdec_reg(cs1) @ 0b101 @ encdec_reg(cd) @ 0b0010011
 
 mapping clause assembly = SCADDR(cd, cs1, rs2)  <-> "scaddr"  ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ reg_name(rs2)
 mapping clause assembly = CADD(cd, cs1, rs2)    <-> "cadd"    ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ reg_name(rs2)
