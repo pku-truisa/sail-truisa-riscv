@@ -146,18 +146,13 @@ set(sail_common
 
     set(truisa_sys_srcs
         "riscv_vext_control.sail"
-        # ⚠️ ORDER MATTERS: the TruISA file must come FIRST here, because it supplies
-        # read_stvec_utvec, which the base file below calls at :7. Sail resolves
-        # cross-file function uses in file order; with the base file first the build stops
-        # with "Function read_stvec_utvec not found" even though the definition exists
-        # (measured). This is the opposite of "override after the base" -- nothing here is
-        # being overridden, one line is being supplied.
+        # The TruISA file supplies the base CSR accessors (lines 1-59 of
+        # riscv_sys_regs_access.sail) minus the xTVT block, and also the read_stvec_utvec
+        # that the base file calls, so it must stay and the base file must not be in the
+        # chain at all. ADR-0024 section 11.4b forbids editing the original riscv_* file,
+        # and xTVT is an upstream hole rather than CHERI code, so the chain is what
+        # changes (ADR "xTVT ruling 丁").
         "truisa/truisa_sys_regs_access.sail"
-        # ADR-0011 decision 10: TruISA keeps the BASE semantic for mtvec/mepc/mscratch
-        # (write unchecked, form judged at the use point), so the upstream accessors are
-        # exactly what we want -- the opposite of CHERI, which replaces this file with its
-        # own capability versions.
-        "riscv_sys_regs_access.sail"
         "riscv_sys_regs_access_common.sail"
         "truisa/truisa_sys_exceptions.sail"
         "riscv_sync_exception.sail"
