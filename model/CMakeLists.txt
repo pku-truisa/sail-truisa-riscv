@@ -146,6 +146,12 @@ set(sail_common
 
     set(truisa_sys_srcs
         "riscv_vext_control.sail"
+        # ADR-0011 decision 10: TruISA keeps the BASE semantic for mtvec/mepc/mscratch
+        # (write unchecked, form judged at the use point), so the upstream accessors are
+        # exactly what we want -- the opposite of CHERI, which replaces this file with its
+        # own capability versions. The TruISA placeholder below stays empty (it is the
+        # mirror position, not an override), so the two do not collide.
+        "riscv_sys_regs_access.sail"
         "truisa/truisa_sys_regs_access.sail"
         "riscv_sys_regs_access_common.sail"
         "truisa/truisa_sys_exceptions.sail"
@@ -203,10 +209,15 @@ set(sail_common
         "riscv_freg_type.sail"
         "truisa/truisa_vmem_types.sail"
         "riscv_regs.sail"
+        # ⚠️ NOT riscv_sys_regs_types.sail: that upstream file defines `bitfield Seccfg`
+        # at :33, and `riscv_sys_regs.sail:321` defines it AGAIN -> "name is already
+        # bound" (measured: that is exactly the first error you get if you swap it in).
+        # Neither chain uses the upstream split, so this position stays a TruISA
+        # placeholder. Reported to the architecture group with the error text.
         "truisa/truisa_sys_regs_types.sail"
-        "truisa/truisa_sys_regs_xstatus.sail"
+        "riscv_sys_regs_xstatus.sail"
         "riscv_sys_regs.sail"
-        "truisa/truisa_sys_regs_envcfg.sail"
+        "riscv_sys_regs_envcfg.sail"
         "riscv_pmp_regs.sail"
         "riscv_pmp_control.sail"
         "truisa/truisa_sys_regs.sail"
