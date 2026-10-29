@@ -28,7 +28,7 @@ function clause execute (GCBASE(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(base, _) => zero_extend(base)
+    Some(base, _) => sign_extend(base)
   };
   RETIRE_SUCCESS
 }
@@ -48,7 +48,7 @@ function clause execute (GCBOUND(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(_, bound) => zero_extend(bound)
+    Some(_, bound) => sign_extend(bound)
   };
   RETIRE_SUCCESS
 }
@@ -64,7 +64,11 @@ function clause execute (GCBOUND(rd, cs1)) = {
  * yields its real address (only bits 47-0 are read).
  */
 function clause execute (GCADDR(rd, cs1)) = {
-  X(rd) = zero_extend(C(cs1).address);
+  /* Slice [VA-1..0] BEFORE extending, and do not simplify this to
+   * `C(cs1).address` even though they agree bit for bit on canonical pointers: the
+   * slice is the only place a non-canonical address written by wX gets normalised
+   * (ADR-0029 decision 7). */
+  X(rd) = sign_extend(C(cs1).address[truisa_address_width - 1 .. 0]);
   RETIRE_SUCCESS
 }
 
@@ -171,7 +175,7 @@ function clause execute (SCBNDSI(cd, cs1, imm)) = {
   let hi_ok : bool = imm[8 .. truisa_nc_width] == zeros();
   // Criteria (1)(2)(4) live in setCapBounds: form + N <= VA (via monotonicity)
   // + slot inside the parent's checked interval.
-  let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address, nbits);
+  let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address[truisa_address_width - 1 .. 0], nbits);
   C(cd) = poisonIf(newCap, not(hi_ok) | not(inParent));
   RETIRE_SUCCESS
 }
@@ -199,7 +203,7 @@ function clause execute (SCBNDS(cd, cs1, rs2)) = {
   let nbits : bits(truisa_nc_width) = rs2_val[truisa_nc_width - 1 .. 0];
   // Criterion (3): everything above N must be zero -- fail loud.
   let hi_ok : bool = rs2_val[xlen - 1 .. truisa_nc_width] == zeros();
-  let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address, nbits);
+  let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address[truisa_address_width - 1 .. 0], nbits);
   C(cd) = poisonIf(newCap, not(hi_ok) | not(inParent));
   RETIRE_SUCCESS
 }
@@ -232,7 +236,13 @@ union clause instruction = SCEQ : (regidx, regidx, regidx)
 function clause execute (SCEQ(rd, cs1, cs2)) = {
   let cs1_val = C(cs1);
   let cs2_val = C(cs2);
-  X(rd) = zero_extend(bool_to_bits(cs1_val == cs2_val));
+  /* ⛔ Do NOT compare the two structs directly. address[63:VA] is redundant, so wX can
+   * put anything there; structural equality is therefore not pointer equality
+   * (ADR-0029 invariant I2). The semantics is "all bits of the encoding are equal"
+   * (blueprint 2.8.5.1 p52), so rebuild the 64-bit MEMORY encoding on both sides. */
+  let e1 : CapBits = capToMetadataBits(cs1_val) @ cs1_val.address[truisa_address_width - 1 .. 0];
+  let e2 : CapBits = capToMetadataBits(cs2_val) @ cs2_val.address[truisa_address_width - 1 .. 0];
+  X(rd) = zero_extend(bool_to_bits(e1 == e2));
   RETIRE_SUCCESS
 }
 
@@ -247,19 +257,23 @@ union clause instruction = CSUB   : (regidx, regidx, regidx)
  * operands are sign-extended from the 48-bit address field first, so a
  * high-half address counts as negative and the difference has the right sign.
  *
- * ⚠️ This is deliberately NOT the zero extension used by GCBASE / GCBOUND /
- * GCADDR. Those three return the raw 48-bit FIELD value (for Len, printing,
- * comparing); CSUB returns a signed DISTANCE (the ptrdiff_t quantity). If the
- * operands were zero-extended instead, a difference taken across bit VA-1
- * would come out with the OPPOSITE SIGN and off by 2^VA. Do NOT "unify" the
- * two -- they are different quantities, not two spellings of one.
+ * ⚠️ Since ADR-0029 decision 7, GCBASE / GCBOUND / GCADDR also sign-extend, so
+ * the old "this is deliberately NOT the zero extension those three use" note no
+ * longer distinguishes anything -- all four project the same way. What is still
+ * specific to CSUB is the VALUE: a signed DISTANCE (the ptrdiff_t quantity),
+ * not a field. Zero-extending either operand would flip the sign of any
+ * difference taken across bit VA-1 and be off by 2^VA.
+ *
+ * The [VA-1..0] slice stays even though `address` is now 64 bits wide: it is
+ * the normalisation point for non-canonical integers written by wX (decision 7).
  *
  * Ported from CHERIoT's CSub (cheriot-sail src/cheri_insts.sail:472), with
- * C(x).address replaced by sign_extend(X(x)[47..0]) -- TruISA keeps pointers
+ * C(x).address replaced by sign_extend(X(x)[VA-1..0]) -- TruISA keeps pointers
  * in the integer register file.
  */
 function clause execute (CSUB(rd, cs1, cs2)) = {
-  X(rd) = sign_extend(C(cs1).address) - sign_extend(C(cs2).address);
+  X(rd) = sign_extend(C(cs1).address[truisa_address_width - 1 .. 0])
+          - sign_extend(C(cs2).address[truisa_address_width - 1 .. 0]);
   RETIRE_SUCCESS
 }
 

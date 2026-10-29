@@ -96,12 +96,56 @@ type CapAddrBits = bits(truisa_address_width)
 type CapTagBits  = bits(truisa_mode_width + truisa_nc_width)
 
 /* ------------------------------------------------------------------------------------
+ * ADR-0029 decision 1. The REGISTER representation is now wider than the memory
+ * encoding: `address` is a full machine word (truisa_ptr_width = 64), so the struct is
+ * 80 bits while CapBits above stays 64. Three derived widths, none of them a new
+ * decision:
+ *
+ *   truisa_meta_width      = 64 - 48 = 16    mode + nc + pac, i.e. everything but address
+ *   truisa_cap_repr_width  = 64 + 16 = 80    bookkeeping only (never enters a bits())
+ *   CapMetaBits            = bits(16)        return type of capToMetadataBits
+ *
+ * // TRUISA DELTA: the blueprint needs no such split -- its 128-bit capability is one
+ * // contiguous encoding, so capToBits is a function there. At 80 -> 64 it is not (no
+ * // injection), which is exactly why capToMetadataBits replaces it below.
+ * //
+ * // ⛔ Do NOT restate truisa_pac_width (:61) in terms of truisa_meta_width. That one
+ * // means "everything left over after mode+nc+address" (9); this one means "everything
+ * // except address" (16). Same-looking subtractions, different meanings.
+ * ---------------------------------------------------------------------------------- */
+type truisa_meta_width : Int = truisa_ptr_width - truisa_address_width
+let  truisa_meta_width = sizeof(truisa_meta_width)
+
+/* Bookkeeping only: 80. ⛔ Never used inside bits() -- CapBits stays bits(64). */
+type truisa_cap_repr_width : Int = truisa_ptr_width + truisa_meta_width
+let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
+
+type CapMetaBits = bits(truisa_meta_width)
+
+/* ------------------------------------------------------------------------------------
  * 1a-1. The capability.
+ *
+ * Two views, and they are NOT the same width (ADR-0029 decision 1). Keep both in mind:
+ *
+ * MEMORY ENCODING -- CapBits, 64 bits, unchanged (this is what SCEQ compares and what
+ * the load/store path moves):
  *
  * 63            62      57 56        48 47                                    0
  * +---------------+--------+-----------+---------------------------------------+
  * | mode (1)      | N/C (6)| PAC (9)   | address (48)                          |
  * +---------------+--------+-----------+---------------------------------------+
+ *
+ * REGISTER REPRESENTATION -- the struct, 80 bits (truisa_cap_repr_width):
+ *
+ * 79      73 72      64 63                                                 0
+ * +---------+----------+----------------------------------------------------+
+ * | mode+NC | PAC (9)  | address (64)                                       |
+ * +---------+----------+----------------------------------------------------+
+ *
+ * ⚠️ `address[63:48]` is REDUNDANT in the register: it is dropped when encoding, so two
+ * structs differing only there are the same pointer (ADR-0029 invariant I2). bitsToCap
+ * therefore fills it by sign extension, which makes encode . decode = id on canonical
+ * values; a value written by wX need not be canonical (invariant I1).
  *
  * // TRUISA DELTA vs cheri_cap_common.sail:69: the blueprint has twelve fields (tag,
  * // sd_perms, ap_m, cl, sealed, internal_exponent, E, B, T, reserved_0/1, address)
@@ -116,7 +160,7 @@ struct Capability = {
   mode    : bits(truisa_mode_width),
   nc      : bits(truisa_nc_width),
   pac     : bits(truisa_pac_width),
-  address : CapAddrBits,
+  address : bits(truisa_ptr_width),
 }
 
 /* The canonical poison value: tag = 0111111 (mode 0, N/C 63), everything else zero.
@@ -130,24 +174,41 @@ let truisa_poison_cap : Capability = struct {
 }
 
 /* ------------------------------------------------------------------------------------
- * 1a-2 / 1a-3. Assemble and disassemble the 64-bit pointer.
+ * 1a-2 / 1a-3. Disassemble and assemble the memory encoding.
  *
- * These two are inverses and must stay that way: every instruction that reads a field
- * goes through one of them rather than slicing the struct twice (bit-position drift is
+ * ⛔ There is no `capToBits` any more (ADR-0029 decision 3). With `address` at 64 bits,
+ * `mode @ nc @ pac @ address` is 80 bits and cannot return CapBits (64): 80 -> 64 has
+ * no injection, so `capToBits` is not a function. Encoding is assembled AT THE USE SITE
+ * instead -- `capToMetadataBits(cap) @ cap.address[truisa_address_width - 1 .. 0]` --
+ * which is the shape the blueprint uses too (cheri_insts.sail:211). ⛔ Do not rescue it
+ * with `truncate`: that breaks encode . decode = id.
+ *
+ * What survives is the metadata half. Every instruction that reads a field still goes
+ * through one of these two rather than slicing the struct twice (bit-position drift is
  * the failure mode this prevents -- the same reason getCapTagBits exists).
  * ---------------------------------------------------------------------------------- */
-val  capToBits : Capability -> CapBits
-function capToBits(cap : Capability) -> CapBits =
-  cap.mode @ cap.nc @ cap.pac @ cap.address
+val  capToMetadataBits : Capability -> CapMetaBits
+function capToMetadataBits(cap : Capability) -> CapMetaBits =
+  cap.mode @ cap.nc @ cap.pac
 
-val  bitsToCap : CapBits -> Capability
-function bitsToCap(ptr : CapBits) -> Capability =
+/* encode . decode = id, **only on canonical capabilities** (address[63:VA] == bit(VA-1),
+ * ADR-0029 invariant I1). A bare integer written by wX is not canonical and does not
+ * satisfy it; that is by design, not a defect (decision 6).
+ *
+ * `tag` is a DEAD parameter, kept for signature parity with cheri_cap_common.sail:99
+ * (ADR-0029 decision 4). TruISA has no tag bit (ADR-0003). ⛔ Do not rename it `_tag`. */
+val  bitsToCap : (bool, CapBits) -> Capability
+function bitsToCap(tag : bool, ptr : CapBits) -> Capability =
   struct {
     mode    = ptr[truisa_ptr_width - 1 .. truisa_ptr_width - truisa_mode_width],
     nc      = ptr[truisa_ptr_width - truisa_mode_width - 1
                   .. truisa_address_width + truisa_pac_width],
     pac     = ptr[truisa_address_width + truisa_pac_width - 1 .. truisa_address_width],
-    address = ptr[truisa_address_width - 1 .. 0],
+    /* Sign extension, not zero extension: address[63:48] carries no information, so
+     * without a rule the same pointer would have 2^16 representations. Copying bit
+     * (VA-1) is the only choice that makes encode . decode = id and that matches the
+     * RISC-V canonical address form (ADR-0029 decision 5). */
+    address = sign_extend(ptr[truisa_address_width - 1 .. 0]),
   }
 
 /* ------------------------------------------------------------------------------------
@@ -157,7 +218,7 @@ function bitsToCap(ptr : CapBits) -> Capability =
  * ---------------------------------------------------------------------------------- */
 val  getCapTagBits : Capability -> CapTagBits
 function getCapTagBits(cap : Capability) -> CapTagBits =
-  capToBits(cap)[truisa_ptr_width - 1 .. truisa_address_width + truisa_pac_width]
+  capToMetadataBits(cap)[truisa_meta_width - 1 .. truisa_pac_width]
 
 /* ------------------------------------------------------------------------------------
  * 1a-5. Which of the five forms the label denotes.
@@ -369,7 +430,7 @@ type CapPacBits = bits(truisa_pac_width)
 
 val  getCapPac : Capability -> CapPacBits
 function getCapPac(cap : Capability) -> CapPacBits =
-  capToBits(cap)[truisa_address_width + truisa_pac_width - 1 .. truisa_address_width]
+  capToMetadataBits(cap)[truisa_pac_width - 1 .. 0]
 
 /* salt is 32 bits (spec/ch04 line 183). Descriptor mode reads it from the table entry;
  * aligned-slot mode uses all zeros (ADR-0005 rev 11 item 3). ⚠️ The segment is NOT
@@ -399,7 +460,9 @@ type cap_salt = bits(32)
 val  signPtr : (Capability, cap_salt) -> Capability
 function signPtr(cap : Capability, salt : cap_salt) -> Capability = {
   let hi7 = getCapTagBits(cap);
-  let m   = getCapCentroID(cap.address, cap.nc);
+  /* Slices [VA-1..0]: getCapCentroID's first parameter is CapAddrBits (48), not the
+   * 64-bit struct field. The redundant high bits are not part of the address. */
+  let m   = getCapCentroID(cap.address[truisa_address_width - 1 .. 0], cap.nc);
   let msg : bits(87) = hi7 @ m @ salt;
   struct {
     mode    = cap.mode,
@@ -442,7 +505,9 @@ function makeCapAligned(parent : Capability, n : bits(truisa_nc_width), fail : b
       mode    = 0b1,
       nc      = n,
       pac     = zeros(),
-      address = getCapSlotBase(parent.address, n),
+      /* getCapSlotBase takes and returns CapAddrBits (48); the struct field is 64 bits,
+       * so the result is sign-extended back into canonical form (ADR-0029 decision 5). */
+      address = sign_extend(getCapSlotBase(parent.address[truisa_address_width - 1 .. 0], n)),
     };
     signPtr(q, zeros())
   }
@@ -488,7 +553,10 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   let form_ok   = form == FormAligned | form == FormBare;
   let n_ok      = k <= truisa_address_width;
   let in_parent = if form == FormBare then true else k >= kp;
-  let base_ok   = base == parent.address;
+  /* `base` is CapAddrBits (48) and the struct field is 64: slice the right-hand side so
+   * the comparison is between addresses, not between an address and 16 redundant bits
+   * (ADR-0029 invariant I2 -- those bits are not part of the value). */
+  let base_ok   = base == parent.address[truisa_address_width - 1 .. 0];
   if form_ok & n_ok & in_parent & base_ok then
     (true, makeCapAligned(parent, n, false))
   else
