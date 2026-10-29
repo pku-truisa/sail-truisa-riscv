@@ -324,12 +324,7 @@ bitfield Seccfg : bits(64) = {
   // Enable access to SEED in U-mode
   USEED  : 8,
   // Reserved WPRI bits
-  wpri_1 : 7 .. 4,
-  // CHERI Register Enable
-  // Whether CHERI registers are enabled for M mode.
-  CRE : 3,
-  // Reserved WPRI bits
-  wpri_0 : 2 .. 0,
+  wpri_0 : 7 .. 0,
 }
 
 function legalize_mseccfg(o : Seccfg, v : bits(64)) -> Seccfg = {
@@ -346,7 +341,6 @@ function legalize_mseccfg(o : Seccfg, v : bits(64)) -> Seccfg = {
   [o with
     SSEED = if sseed_read_only_zero then 0b0 else v[SSEED],
     USEED = if useed_read_only_zero then 0b0 else v[USEED],
-    CRE = v[CRE],
   ]
 }
 

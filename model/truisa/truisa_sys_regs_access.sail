@@ -24,3 +24,14 @@
  *=======================================================================================*/
 
 /* TODO(truisa): analysis pending. */
+
+/* The shared base file riscv_sys_regs_access.sail:7 calls this, but nothing in the
+ * vendored tree defines it -- it belongs to an extension that is not in this tree
+ * (the same is true of the 72a56e9 upstream baseline, so stripping CHERI does not
+ * remove the hole).
+ *
+ * This is NOT a stub added to make the checker quiet: the identity IS the architecture
+ * here. There is no separate U-mode trap vector in TruISA -- stvec is a single register
+ * with base semantics (ADR-0011 decision 2) -- so reading it back is reading the value
+ * itself. Contrast with PCC, which was pure scaffolding and was deleted outright. */
+function read_stvec_utvec(v : xlenbits) -> xlenbits = v

@@ -146,13 +146,18 @@ set(sail_common
 
     set(truisa_sys_srcs
         "riscv_vext_control.sail"
+        # ⚠️ ORDER MATTERS: the TruISA file must come FIRST here, because it supplies
+        # read_stvec_utvec, which the base file below calls at :7. Sail resolves
+        # cross-file function uses in file order; with the base file first the build stops
+        # with "Function read_stvec_utvec not found" even though the definition exists
+        # (measured). This is the opposite of "override after the base" -- nothing here is
+        # being overridden, one line is being supplied.
+        "truisa/truisa_sys_regs_access.sail"
         # ADR-0011 decision 10: TruISA keeps the BASE semantic for mtvec/mepc/mscratch
         # (write unchecked, form judged at the use point), so the upstream accessors are
         # exactly what we want -- the opposite of CHERI, which replaces this file with its
-        # own capability versions. The TruISA placeholder below stays empty (it is the
-        # mirror position, not an override), so the two do not collide.
+        # own capability versions.
         "riscv_sys_regs_access.sail"
-        "truisa/truisa_sys_regs_access.sail"
         "riscv_sys_regs_access_common.sail"
         "truisa/truisa_sys_exceptions.sail"
         "riscv_sync_exception.sail"
@@ -222,12 +227,12 @@ set(sail_common
         "riscv_pmp_control.sail"
         "truisa/truisa_sys_regs.sail"
         "truisa/truisa_regs.sail"
-        # NOT riscv_pc_access.sail: the fork patched that shared base file in place,
-        # adding PCC / nextPCC / set_next_pcc / force_pc. TruISA has no PC capability
-        # (ADR-0011 decision 2) and none of those four has a reader or caller, so this
-        # position carries a TruISA replacement that drops them. This is an EXCEPTION to
-        # the one-file-per-mirror rule -- cheri/ has no cheri_pc_access.sail to mirror.
-        "truisa/truisa_pc_access.sail"
+        # Shared base file, with the fork's CHERI additions stripped in place
+        # (PCC / nextPCC / set_next_pcc / force_pc). The CHERI chain is no longer a build
+        # target (ADR-0024 decision 11), so editing this file is allowed -- the earlier
+        # TruISA mirror file was deleted with it, or the four accessors would be defined
+        # twice.
+        "riscv_pc_access.sail"
         "riscv_vreg_type.sail"
         "riscv_vext_regs.sail"
     )

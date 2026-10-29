@@ -30,24 +30,6 @@ function set_next_pc(pc) = {
 
 val tick_pc : unit -> unit
 function tick_pc() = {
-  PCC = nextPCC;
   PC = nextPC;
   pc_write_callback(PC);
-}
-
-// Note that although the Sail model ignores the address part of PCC (it uses
-// PC instead), we require it to be correct when this function is called so
-// that convertInvalidAddr() behaves correctly.
-val set_next_pcc : Capability -> unit
-function set_next_pcc(pcc) = {
-  // This is technically redundant for CJALR since it already bounds checks
-  // the reduced address and unseals the cap.
-  nextPCC = convertInvalidAddr(pcc);
-}
-
-// For forcing PC from C. This is ugly.
-function force_pc(pc : bits(64)) -> unit = {
-  let addr = truncate(pc, xlen);
-  PC = addr;
-  PCC = setCapAddrChecked(PCC, addr);
 }
