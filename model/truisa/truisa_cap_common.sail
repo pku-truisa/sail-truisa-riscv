@@ -667,11 +667,32 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
 
     let new48 : CapAddrBits = truncate(sum, truisa_address_width);
 
+    /* Criterion (1) -- representable. A bare pointer has no slot, so the requirement
+     * degrades to staying in the same bit (VA-1) HALF, exactly as in setCapAddrChecked
+     * below (ADR-0029 decision 11.4). ⚠️ It is NOT `true`: letting CADD cross the half
+     * while SCADDR refuses to would mean relative moves and absolute writes disagree
+     * about legality -- the very incoherence isa/07 section 7.7.10 uses to reject the
+     * [base,bound] reading. Cost: a bare pointer cannot cross 2^(VA-1). */
     let same_slot : bool =
-      if form == FormBare then true
+      if form == FormBare then a[truisa_address_width - 1] == new48[truisa_address_width - 1]
       else getCapSlotBase(a, cap.nc) == getCapSlotBase(new48, cap.nc);
 
-    let intact : bool = verifyPtr(cap, zeros());
+    /* Criterion (2) -- intact. ⚠️⚠️ SKIPPED for bare, and that is load-bearing, not a
+     * convenience: in phase A `verifyPtr(cap, zeros())` does not mean "integrity
+     * verified", it means "cs1 is not bare". Aligned pointers are signed by
+     * makeCapAligned with zeros() (so the check is trivially true), and bare pointers are
+     * NEVER signed (ADR-0005 decision 3) -- so on bare it is trivially FALSE. Without the
+     * skip, every bare-pointer `p += 4` in S/M mode would poison, which is the whole of
+     * ADR-0011's permissive tier (ADR-0029 decision 11.2).
+     *
+     * ⚠️ `zeros()` is a PHASE-A PLACEHOLDER, not a salt (ADR-0029 decision 11.3). When the
+     * descriptor table arrives, the salt must come from the entry / DLB. The failure mode
+     * if that call site is not updated is silent and total: verifyPtr would compare against
+     * a MAC computed with zeros() while the table signed with the real salt, so EVERY
+     * pointer fails and nothing goes red. Do not trust criterion (2) as an integrity
+     * guarantee before then. */
+    let intact : bool =
+      if form == FormBare then true else verifyPtr(cap, zeros());
 
     let newCap : Capability = struct {
       mode    = cap.mode,
@@ -696,6 +717,11 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
  * ⚠️ Only ONE criterion, not CADD's three: scaddr.adoc notes explicitly that the result's
  * bits 63-VA equal the source's BY CONSTRUCTION (the label is copied, not recomputed), so
  * that is not an independent check; and there is no delta, so there is no carry to test.
+ * ⭐ CORRECTION (ADR-0029 decision 11.5): that reading dropped criterion (2) as well. The
+ * "high 16 bits" sentence in scaddr.adoc explains why there is no THIRD criterion; it is
+ * not criterion (2). SCADDR does have an integrity criterion, and isa/07 section 7.7.10
+ * spells out both. Both are evaluated below, in the spec's order (1 representable, then
+ * 2 intact), so that a future xtval can say which one failed first.
  *
  * ⚠️ `pac` is copied for the same reason as in 1c-2: the MAC covers the CentroID, and the
  * criterion just proved the address did not leave the slot.
@@ -710,15 +736,22 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
   if form == FormPoisoned | form == FormInvalid then cap
   else {
     let a : CapAddrBits = cap.address[truisa_address_width - 1 .. 0];
+    /* (1) representable: same slot, or -- for bare, which has no slot -- the same
+     * bit (VA-1) half. Same rule as incCapAddrChecked, deliberately (decision 11.4). */
     let representable : bool =
       if form == FormBare then addr[truisa_address_width - 1] == a[truisa_address_width - 1]
       else getCapSlotBase(a, cap.nc) == getCapSlotBase(addr, cap.nc);
+    /* (2) intact: skipped for bare for the same reason as in 1c-2 (bare is never signed,
+     * so the check would be trivially false and SCADDR would poison every bare address
+     * write). zeros() is the PHASE-A PLACEHOLDER, not a salt -- see the warning above. */
+    let intact : bool =
+      if form == FormBare then true else verifyPtr(cap, zeros());
     let newCap : Capability = struct {
       mode    = cap.mode,
       nc      = cap.nc,
       pac     = cap.pac,
       address = sign_extend(addr),
     };
-    poisonIf(newCap, not(representable))
+    poisonIf(newCap, not(representable) | not(intact))
   }
 }
