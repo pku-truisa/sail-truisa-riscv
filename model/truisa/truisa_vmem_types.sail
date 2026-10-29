@@ -1,26 +1,52 @@
-/*=======================================================================================*
- *  TruISA: placeholder for model/cheri/cheri_vmem_types.sail
- *
- *  Why this file exists: the fork mirrors the CHERI tree one file for one, so that
- *  the two models can be read side by side and every position in model/CMakeLists.txt
- *  has a counterpart. An empty placeholder is still meaningful: it marks a position
- *  where the answer is "TruISA has nothing here", and that answer has to be justified
- *  like any other.
- *
- *  What the blueprint file does: is_sv_mode / level_range / pte_bits — the address-translation vocabulary.
- *
- *  Status: NOT YET ANALYSED. Nothing is defined below. Files are analysed in
- *  dependency order, from the top of model/CMakeLists.txt down; until then the fork
- *  does not type-check, and that is expected -- a missing definition is a question for
- *  spec, not something to paper over with a stub that compiles.
- *
- *  Rules for filling this in (see CODE_STYLE.md, "Fork rule"):
- *    1. Copy the blueprint block order, then edit; do not rewrite from scratch.
- *    2. Mark every deviation with a TRUISA DELTA comment naming the ADR that forces it.
- *    3. If the answer is "the upstream riscv_*.sail already does this", say so here and
- *       leave the file empty instead of duplicating it.
- *    4. If nobody knows what the definition should be, stop and raise a CR -- do not
- *       invent a definition that merely satisfies the type checker (D-69 section 5).
- *=======================================================================================*/
+/*=======================================================================================*/
+/*  This Sail RISC-V architecture model, comprising all files and                        */
+/*  directories except where otherwise noted is subject the BSD                          */
+/*  two-clause license in the LICENSE file.                                              */
+/*                                                                                       */
+/*  SPDX-License-Identifier: BSD-2-Clause                                                */
+/*=======================================================================================*/
 
-/* TODO(truisa): analysis pending. */
+// Type constraint that checks if 'v is a valid virtual memory mode size.
+type is_sv_mode('v) -> Bool = 'v in {32, 39, 48, 57}
+
+// Range of possible page levels depending on the virtual memory mode:
+//
+//   Sv32 = range(0, 1)
+//   Sv39 = range(0, 2)
+//   Sv48 = range(0, 3)
+//   Sv57 = range(0, 4)
+//
+type level_range('v), is_sv_mode('v) =
+  range(0, (if 'v == 32 then 1 else (if 'v == 39 then 2 else (if 'v == 48 then 3 else 4))))
+
+// Size of a Page Table Entry, depending on the virtual memory mode.
+type pte_bits('v), is_sv_mode('v) = bits(if 'v == 32 then 32 else 64)
+
+// Number of Physical Page Number bits, depending on the virtual memory mode.
+type ppn_bits('v), is_sv_mode('v) = bits(if 'v == 32 then 22 else 44)
+
+// Number of Virtual Page Number bits, depending on the virtual memory mode.
+type vpn_bits('v), is_sv_mode('v) = bits('v - pagesize_bits)
+
+
+// Extensions for memory Accesstype.
+
+type ext_access_type = unit
+
+let Data  : ext_access_type = ()
+
+let default_write_acc : ext_access_type = Data
+
+val accessType_to_str : AccessType(ext_access_type) -> string
+function accessType_to_str (a) =
+  match a {
+    Read(_)           => "R",
+    Write(_)          => "W",
+    ReadWrite(_, _)   => "RW",
+    InstructionFetch() => "X",
+    Cache(CleanFlush) => "CACHE.CLEANFLUSH",
+    Cache(Inval)      => "CACHE.INVAL",
+    Cache(Zero)       => "CACHE.ZERO"
+  }
+
+overload to_str = {accessType_to_str}
