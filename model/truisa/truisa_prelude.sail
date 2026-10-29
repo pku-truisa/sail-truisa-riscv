@@ -24,6 +24,17 @@
 /*       `default_meta = ()` and both __RAM_Meta functions as no-ops. TruISA adds nothing */
 /*       because nothing is missing.                                                     */
 /*                                                                                       */
+/*  --------------------------------------------------------------------------------- */
+/*  PAIRED WITH truisa_mem_metadata.sail (position 6) -- read the two together. */
+/* */
+/*  The reason these two hooks can be left out is that nothing calls them, and the only */
+/*  callers are three lines inside truisa_mem_metadata.sail. That file in turn is empty */
+/*  because TruISA has no tag store. The two decisions hold each other up: keep the */
+/*  hooks without the caller file and they are dead declarations; keep the caller file */
+/*  without the hooks and its three lines reference undefined names -- a compile break, */
+/*  not a semantic nicety. Hence both land together and each points at the other (D-95). */
+/*  --------------------------------------------------------------------------------- */
+/* */
 /*  ⚠️ If ADR-0001 §4 ("defer the per-16-byte in-memory tag") is ever lifted, this is the */
 /*     file where the tag hooks would reappear, together with a granule width and a       */
 /*     mem_meta that is no longer unit. Until then, an empty file is the truthful         */

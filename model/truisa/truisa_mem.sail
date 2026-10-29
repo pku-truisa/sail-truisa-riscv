@@ -9,6 +9,17 @@
  *
  *  What the blueprint file does: mem_read_cap / mem_write_cap — capability-aware memory access.
  *
+ *  ---------------------------------------------------------------------------------
+ *  ⚠️ KNOWN AHEAD OF TIME (D-95) -- do not rediscover this in round 22.
+ *
+ *  The blueprint's cheri_mem.sail:34 passes cap.tag (a bool) as the metadata argument
+ *  to the RAM accessor. On the TruISA side mem_meta is `unit` (supplied by upstream
+ *  prelude_mem_metadata.sail; see truisa_mem_metadata.sail for why that file is empty).
+ *  Passing a bool where unit is expected is a TYPE ERROR, not merely a semantic
+ *  mismatch -- D-89 had registered the semantic side, and this is the compile-level
+ *  evidence for the same conclusion: the blueprint block cannot be copied over.
+ *  ---------------------------------------------------------------------------------
+ *
  *  Status: NOT YET ANALYSED. Nothing is defined below. Files are analysed in
  *  dependency order, from the top of model/CMakeLists.txt down; until then the fork
  *  does not type-check, and that is expected -- a missing definition is a question for
