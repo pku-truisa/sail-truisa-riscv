@@ -682,3 +682,43 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
     poisonIf(newCap, overflow | not(same_slot) | not(intact))
   }
 }
+
+/* --- 1c-3. The checked address setter used by SCADDR -------------------------------
+ *
+ * ⛔ NOT "setCapAddr plus a sealed check": TruISA has no sealed (ADR-0001, ADR-0029
+ * decision 8). The criterion is the one spec/insns/scaddr.adoc states -- the new address
+ * must be REPRESENTABLE relative to the old one:
+ *   - aligned / descriptor mode: same slot (same exponent, same slot base);
+ *   - bare: no slot to stay inside, so the requirement degrades to the same
+ *     bit (VA-1) half of the address space. Crossing halves changes the meaning of the
+ *     sign-extended high bits, which is the closest a slotless pointer has to "moved".
+ *
+ * ⚠️ Only ONE criterion, not CADD's three: scaddr.adoc notes explicitly that the result's
+ * bits 63-VA equal the source's BY CONSTRUCTION (the label is copied, not recomputed), so
+ * that is not an independent check; and there is no delta, so there is no carry to test.
+ *
+ * ⚠️ `pac` is copied for the same reason as in 1c-2: the MAC covers the CentroID, and the
+ * criterion just proved the address did not leave the slot.
+ *
+ * ℹ️ The unchecked blueprint primitive `setCapAddr(c, addr) -> (bool, Capability)` is NOT
+ * defined here: nothing in the TruISA chain calls it, and an unused top-level symbol is
+ * surface with no reader. One line to add if a future instruction needs it.
+ * ---------------------------------------------------------------------------------- */
+val  setCapAddrChecked : (Capability, CapAddrBits) -> Capability
+function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability = {
+  let form = getCapForm(cap);
+  if form == FormPoisoned | form == FormInvalid then cap
+  else {
+    let a : CapAddrBits = cap.address[truisa_address_width - 1 .. 0];
+    let representable : bool =
+      if form == FormBare then addr[truisa_address_width - 1] == a[truisa_address_width - 1]
+      else getCapSlotBase(a, cap.nc) == getCapSlotBase(addr, cap.nc);
+    let newCap : Capability = struct {
+      mode    = cap.mode,
+      nc      = cap.nc,
+      pac     = cap.pac,
+      address = sign_extend(addr),
+    };
+    poisonIf(newCap, not(representable))
+  }
+}

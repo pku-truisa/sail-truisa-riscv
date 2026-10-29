@@ -340,3 +340,110 @@ mapping clause assembly = SCEQ(rd, cs1, cs2)    <-> "sceq"    ^ spc() ^ reg_name
 mapping clause assembly = CADDI(cd, cs1, imm12) <-> "caddi"   ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ hex_bits_12(imm12)
 
 mapping clause assembly = SCBNDSI(cd, cs1, imm) <-> "scbndsi" ^ spc() ^ cap_reg_name(cd) ^ sep() ^ cap_reg_name(cs1) ^ sep() ^ hex_bits_12(0b111 @ imm)
+
+/* ====================================================================================
+ * The data plane: LC / SC (ADR-0030).
+ *
+ * A pointer is 80 bits in a register and 64 bits in memory. Until now nothing moved one
+ * across that boundary, which meant the "80-bit register representation" was an internal
+ * detail no test could exercise. These two instructions are that boundary, and they are
+ * the only place where the compression is visible in the ISA:
+ *
+ *     raw[63 .. 48] = mode @ nc @ pac        (capToMetadataBits)
+ *     raw[47 .. 0]  = address[VA-1 .. 0]
+ *
+ * ⭐ NEITHER instruction verifies the signature. For `sc` the reason is that checking
+ * would buy nothing -- an attacker who wants a bad encoding in memory can simply store a
+ * value they built by hand, without going through a signed pointer. For `lc` it is
+ * consistency with CADD: violations are detected AT THE USE POINT, not at every hop
+ * (ADR-0030 decisions 3 and 4 -- decision 4 enumerates the five use points).
+ *
+ * ⛔ These are NOT `sc.d` / `lr.d`. The `Zalrsc` store-conditional lives in
+ * riscv_insts_zalrsc.sail under OP = 0x2F; ours is OP = 0x23 with funct3 = 100, and the
+ * mnemonics differ by the absence of a width suffix. An assembler must keep them apart.
+ *
+ * ⛔ Do not route these through X()/wX: a pointer operand is read with C() and nothing
+ * else. Going through the integer view is exactly how the metadata gets lost.
+ * ==================================================================================== */
+
+/* --- LC: load 8 bytes and decompress --------------------------------------------- */
+union clause instruction = LC : (regidx, regidx, bits(12))
+/*!
+ * insnref: lc
+ * Load capability
+ *
+ * lc cd, offset(cs1)
+ *
+ * cd gets the 80-bit pointer decompressed from the 64-bit encoding at memory[cs1+offset].
+ * The base address check is the ordinary load path; the LOADED VALUE produces no
+ * exception and no poisoning (this instruction does not verify signatures).
+ *
+ * ⛔ Only valid on an 8-byte object last written by SC. If those 64 bits are an ordinary
+ * integer, its bits 63-57 are read as a label and the result is a well-formed pointer
+ * made of garbage -- so using LC on integers is UNDEFINED (ADR-0030 decision 5). The
+ * load-bearing premise is that the compiler's type information is correct: that is an
+ * ABI/toolchain contract, ⛔ not a hardware guarantee.
+ *
+ * ⚠️ Non-canonical integers do not survive the round trip: compression keeps 48 bits and
+ * decompression sign-extends, so a 64-bit value written by wX with a non-canonical high
+ * half comes back canonicalised. Same cost as ADR-0029 decision 6, via a second door.
+ */
+function clause execute (LC(cd, cs1, imm)) = {
+  let offset : xlenbits = sign_extend(imm);
+  match vmem_read(cs1, offset, 8, Read(Data), false, false, false) {
+    Ok(raw) => {
+      C(cd) = bitsToCap(false, raw);
+      RETIRE_SUCCESS
+    },
+    Err(e) => e,
+  }
+}
+
+/* --- SC: compress and store 8 bytes ---------------------------------------------- */
+union clause instruction = SC : (regidx, regidx, bits(12))
+/*!
+ * insnref: sc
+ * Store capability
+ *
+ * sc cs2, offset(cs1)
+ *
+ * Stores C(cs2) as its 64-bit encoding. No signature check and no table lookup: the
+ * STORED VALUE is not validated (ADR-0030 decision 3) -- storing another object's
+ * pointer, or the poison code, is legal.
+ *
+ * ✅ The poison code survives the round trip: 0111111 compresses to 0x7E00_0000_0000_0000
+ * and decompresses with the same label, so poisoning propagates through memory.
+ *
+ * ⛔ Never mix with `sd` on the same object: `sd` does not decompress, so a word written
+ * by SC and read by LD silently loses nc and pac (ADR-0030 decision 6). Same for AMO / FP
+ * / SIMD on a word written by SC -- the encoding is not a number, and arithmetic carries
+ * into the metadata segment (decision 9).
+ */
+function clause execute (SC(cs2, cs1, imm)) = {
+  let offset : xlenbits = sign_extend(imm);
+  let raw : CapBits = capToMetadataBits(C(cs2)) @ C(cs2).address[truisa_address_width - 1 .. 0];
+  match vmem_write(cs1, offset, 8, raw, Write(Data), false, false, false) {
+    Ok(_) => RETIRE_SUCCESS,
+    Err(e) => e,
+  }
+}
+
+/* Encoding and disassembly.
+ *
+ * `lc` uses funct3 = 100 on OP-FENCE (0x0F), which base RISC-V leaves reserved
+ * (fence = 000, fence.i = 001, cbo.* = 010) -- so this defines a reserved encoding rather
+ * than working around base.
+ *
+ * `sc` uses funct3 = 100 on STORE (0x23), unallocated in base (sb/sh/sw/sd use 000-011).
+ * The 12-bit offset splits S-type style: imm[11:5] and imm[4:0] around rs2.
+ *
+ * Both are the CHERI-RISC-V 0.9.3 encodings and mnemonics (ADR-0024 two-tier reading). */
+mapping clause encdec = LC(cd, cs1, imm)
+  <-> imm @ encdec_reg(cs1) @ 0b100 @ encdec_reg(cd) @ 0b0001111
+mapping clause encdec = SC(cs2, cs1, imm)
+  <-> imm[11 .. 5] @ encdec_reg(cs2) @ encdec_reg(cs1) @ 0b100 @ imm[4 .. 0] @ 0b0100011
+
+mapping clause assembly = LC(cd, cs1, imm)
+  <-> "lc" ^ spc() ^ cap_reg_name(cd)  ^ sep() ^ hex_bits_12(imm) ^ opt_spc() ^ "(" ^ opt_spc() ^ reg_name(cs1) ^ opt_spc() ^ ")"
+mapping clause assembly = SC(cs2, cs1, imm)
+  <-> "sc" ^ spc() ^ cap_reg_name(cs2) ^ sep() ^ hex_bits_12(imm) ^ opt_spc() ^ "(" ^ opt_spc() ^ reg_name(cs1) ^ opt_spc() ^ ")"
