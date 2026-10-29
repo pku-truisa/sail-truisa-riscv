@@ -1,30 +1,8 @@
 /*=======================================================================================*/
 /*  TruISA: enumerated types of the pointer model and of the failure reporting.           */
 /*                                                                                       */
-/*  Counterpart: model/cheri/cheri_types.sail (91 lines).                                */
-/*                                                                                       */
-/*  Kept, with the reasons (D-87):                                                       */
-/*    CapCheckType  -- 3 values, codes 0/1/2, unchanged from cheri_types.sail:49-58.      */
-/*                     TruISA produces all three (isa/08: fetch (0,3) / data (1,4) /      */
-/*                     jump-branch (2,3)), and mtval2.TYPE IS this enum -- proof:         */
-/*                     cheri/test_main_ext.sail:17 asserts                              */
-/*                     mtval2[TYPE] == capchecktype_code(CapCheckType_Data).             */
-/*    CapEx         -- 5 TruISA failure reasons, codes 2/2/3/3/4.                       */
-/*                     ⚠️ NOT CHERI's five names: TruISA has no tag and no sealing, so    */
-/*                     those reasons do not exist; the semantics differ even where the    */
-/*                     count happens to match.                                            */
-/*                                                                                       */
-/*  Dropped, with the reasons:                                                           */
-/*    CPtrCmpOp     -- cheri_types.sail:9-18, the eight capability-compare operations.     */
-/*                     TruISA has CSEQ and no ordering compares (ADR-0018 lists the ops). */
-/*    ClearRegSet   -- cheri_types.sail:20-23, "which register file to clear the tags in". */
-/*                     There are no tags to clear (ADR-0001).                             */
-/*    ExecutionMode -- cheri_types.sail:68-78 (IntPtrMode/CapPtrMode). TruISA has no mode */
-/*                     bit in the pointer; the execution tier is derived from the         */
-/*                     privilege level instead (ADR-0011 rev 1) and lives in              */
-/*                     truisa_addr_checks.sail as ExecTier.                              */
-/*    ArchPerms     -- cheri_types.sail:80-91. TruISA has no permission bits at all       */
-/*                     (ADR-0011); GCBOUND/GCBASE carry no permission check.              */
+/*  Counterpart: model/cheri/cheri_types.sail (91 lines). Defines 2 enums and 2          */
+/*  functions -- nothing else. See D-90 / D-91 for the eleven per-declaration rulings.   */
 /*=======================================================================================*/
 
 /* ------------------------------------------------------------------------------------
@@ -42,9 +20,72 @@ enum CapPtrForm = {
 }
 
 /* ------------------------------------------------------------------------------------
- * What kind of access was being checked. This is the top half of mtval2 (ADR-0024
- * decision 7: TYPE in bits 19-16), so the codes are an external ABI and must match the
- * blueprint's values exactly.
+ * Why the capability check failed. This is the bottom half of mtval2 (CAUSE, bits 3-0).
+ *
+ * // TRUISA DELTA: the names are carried over from the blueprint
+ * // (model/cheri/cheri_types.sail) but the SEMANTICS have changed -- 3 of the 7 reasons
+ * // are TruISA's own, and 2 of CHERI's cannot occur here (no tag: ADR-0001; nothing is
+ * // sealed; no permission bits: ADR-0011).
+ * // Do NOT infer semantics from the name (D-91 ruling 1).
+ *
+ * Codes are the external ABI (mtval2), so they line up with the blueprint's value grid:
+ *   0x0  6    integrity check failed     (blueprint calls code 0 TagViolation -- same
+ *                                        "this pointer is not trustworthy" slot, and 0
+ *                                        was free in TruISA since there is no tag)
+ *   0x2  1    strict tier rejects a Bare base  (blueprint: permission; same "this
+ *                                        operation is not allowed here" slot)
+ *   0x3  *    illegal address: reserved code point / out-of-range slot exponent /
+ *             non-Bare instruction address / zero address
+ *   0x4  1    out of bounds
+ *   0x5  345  table subsystem: missing entry / table not configured / full or slot
+ *             clash -- ONE code for all three, because the spec states they cannot be
+ *             told apart from mtval2 alone. Splitting them would be finer than the
+ *             norm (self-invented).
+ *   0x6  7    monotonicity violation
+ *   0x1       left empty (blueprint: seal violation -- TruISA has no sealing)
+ *
+ * Two reasons share 0x3 and three share 0x5, which is why capex_code below is a
+ * function and not a mapping.
+ * ---------------------------------------------------------------------------------- */
+enum CapEx = {
+  IntegrityFailure,     // 0x0
+  BareInStrictTier,     // 0x2
+  IllegalForm,          // 0x3
+  ZeroAddress,          // 0x3
+  OutOfBounds,          // 0x4
+  TableSubsystem,       // 0x5
+  Monotonicity,         // 0x6
+}
+
+/* function, NOT mapping -- and the reason is NOT "7 values onto 6 codes".
+ * It is that the correspondence is no longer one-to-one: two reasons share 0x3 and
+ * three share 0x5, so there is no inverse. Even if the counts happened to match, a
+ * mapping <-> would still be ill-formed as soon as any two reasons share a code
+ * (D-90; the blueprint's capex_code at cheri_types.sail:33-39 IS a bijection because
+ * CHERI's five reasons map onto five distinct codes).
+ */
+val capex_code : CapEx -> bits(4)
+function capex_code(ex : CapEx) -> bits(4) =
+  match ex {
+    IntegrityFailure => 0x0,
+    BareInStrictTier => 0x2,
+    IllegalForm      => 0x3,
+    ZeroAddress      => 0x3,
+    OutOfBounds      => 0x4,
+    TableSubsystem   => 0x5,
+    Monotonicity     => 0x6,
+  }
+
+/* ------------------------------------------------------------------------------------
+ * What kind of access was being checked. Top half of mtval2 (TYPE, bits 19-16).
+ *
+ * No TRUISA DELTA: same three checks, same codes 0/1/2 as cheri_types.sail:49-58
+ * (D-87 ruling 2). All three are reachable -- isa/08 has fetch (0,*) / data (1,*) /
+ * jump-branch (2,*), which are exactly Inst / Data / JBr. And mtval2.TYPE IS this
+ * enum: cheri/test_main_ext.sail:17 asserts
+ *   mtval2[TYPE] == capchecktype_code(CapCheckType_Data).
+ * ADR-0011 rev 1 "instruction addresses must be Bare" does NOT mean fetch is not
+ * checked: a non-Bare instruction address is precisely what produces (0, 3).
  * ---------------------------------------------------------------------------------- */
 enum CapCheckType = {
   CapCheckType_Inst,
@@ -52,67 +93,42 @@ enum CapCheckType = {
   CapCheckType_JBr,
 }
 
-mapping capchecktype_code : CapCheckType <-> bits(4) = {
-  CapCheckType_Inst <-> 0x0,
-  CapCheckType_Data <-> 0x1,
-  CapCheckType_JBr  <-> 0x2,
-}
-
-mapping capchecktype_name : CapCheckType <-> string = {
-  CapCheckType_Inst <-> "InstructionAccessFault",
-  CapCheckType_Data <-> "LdStAmoDataFault",
-  CapCheckType_JBr  <-> "JBrFault",
-}
+/* function for symmetry with capex_code above: one shape for both views of both enums,
+ * rather than a mapping here and a function there for the same kind of lookup. */
+val capchecktype_code : CapCheckType -> bits(4)
+function capchecktype_code(ty : CapCheckType) -> bits(4) =
+  match ty {
+    CapCheckType_Inst => 0x0,
+    CapCheckType_Data => 0x1,
+    CapCheckType_JBr  => 0x2,
+  }
 
 /* ------------------------------------------------------------------------------------
- * Why the capability check failed. This is the bottom half of mtval2 (CAUSE in bits
- * 3-0).
+ * Deliberately NOT defined here (D-90, each checked for users before dropping):
  *
- * // TRUISA DELTA: the five reasons are TruISA's own, not CHERI's (D-87 ruling 3).
- * // CHERI's set (cheri_types.sail:25-31) is TagViolation / SealViolation /
- * // PermissionViolation / InvalidAddressViolation / LengthViolation -- three of those
- * // cannot occur here: there is no tag to violate (ADR-0001), nothing is sealed, and
- * // there are no permission bits (ADR-0011). The count is five either way, which is a
- * // coincidence, not a correspondence.
- * //
- * // The CODES, on the other hand, are reused deliberately: mtval2 is an external ABI
- * // and its values have to line up with the blueprint's, so the three code values that
- * // exist there (2, 3, 4) keep their meaning slots. Two of our reasons share code 2 and
- * // two share code 3; only OutOfBounds gets a code of its own.
+ *   CPtrCmpOp (blueprint :9-18, 8 constructors)  -- zero users anywhere.
+ *   ClearRegSet (blueprint :20-23)               -- zero users anywhere.
+ *   capex_name (blueprint :41-47)                -- one debug print in
+ *                                                   cheri_addr_checks.sail:26-27, no
+ *                                                   TruISA user.
+ *   capchecktype_name (blueprint :61-66)         -- same, and its values are CHERI's
+ *                                                   exception names
+ *                                                   (InstructionAccessFault /
+ *                                                   LdStAmoDataFault / JBrFault), which
+ *                                                   would suggest TruISA raises those.
+ *   ExecutionMode + execution_mode_encdec (:68-78) -- zero users upstream, and all four
+ *                                                   of its mechanisms (mode bit stored in
+ *                                                   pointer permissions, MODESW, decoding
+ *                                                   twice by mode, ap_m_encdec packing)
+ *                                                   are absent from TruISA: the tier is a
+ *                                                   function of the privilege level
+ *                                                   (ADR-0011 decision 1) and lives in
+ *                                                   truisa_addr_checks.sail as ExecTier.
+ *   ArchPerms + null_perms (blueprint :80-91)     -- zero users in riscv_*.sail; all 7
+ *                                                   users are inside cheri/*.
+ *
+ * ExecutionMode's SEMANTICS stay (two tiers, ADR-0011 decision 1); only the TYPE goes.
+ * If some place genuinely needs a type, use a TruISA-owned name (ExecTier), not
+ * ExecutionMode -- reusing the blueprint's word would be the same "same word, different
+ * meaning" trap that ADR-0011 already warns about with "hybrid".
  * ---------------------------------------------------------------------------------- */
-enum CapEx = {
-  IntegrityFailure,
-  BareInStrictTier,
-  IllegalForm,
-  ZeroAddress,
-  OutOfBounds,
-}
-
-/* ⚠️ function, NOT mapping.
- * CHERI's capex_code (cheri_types.sail:33-39) is a mapping because its five reasons map
- * one-to-one onto five codes. TruISA's five reasons map onto THREE codes, so there is no
- * inverse and a `mapping <->` would be ill-formed -- Sail would reject it, and "fixing"
- * that by inventing extra codes would change the external ABI (D-82 ④: an internal enum
- * need not correspond one-to-one with an external encoding).
- */
-val capex_code : CapEx -> bits(4)
-function capex_code(ex : CapEx) -> bits(4) =
-  match ex {
-    IntegrityFailure => 0x2,
-    BareInStrictTier => 0x2,
-    IllegalForm      => 0x3,
-    ZeroAddress      => 0x3,
-    OutOfBounds      => 0x4,
-  }
-
-/* Also a function, for the same reason: kept parallel with capex_code rather than mixing
- * a bijective mapping with a non-bijective function for two views of one enum. */
-val capex_name : CapEx -> string
-function capex_name(ex : CapEx) -> string =
-  match ex {
-    IntegrityFailure => "IntegrityFailure",
-    BareInStrictTier => "BareInStrictTier",
-    IllegalForm      => "IllegalForm",
-    ZeroAddress      => "ZeroAddress",
-    OutOfBounds      => "OutOfBounds",
-  }
