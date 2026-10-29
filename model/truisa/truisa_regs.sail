@@ -51,3 +51,14 @@ function wC_bits(Regidx(i) : regidx, v : regtype) -> unit = {
  *
  * Same shape as cheri_regs.sail:26. */
 overload C = {rC_bits, wC_bits, rC, wC}
+
+/* ⚠️ TRUISA DELTA: the blueprint's cap_reg_name (cheri_regs.sail:40) prints a capability
+ * operand as "cN", because CHERI has a separate capability register file. TruISA has one
+ * register file and C() is only a view of it (ADR-0001, ADR-0003), so a capability
+ * operand IS an integer register and prints exactly the same way.
+ *
+ * Kept as a distinct name rather than deleting the call sites: the disassembly lines in
+ * truisa_inst.sail read `cap_reg_name(cs1)`, which documents that the operand is a
+ * pointer, and that is worth keeping visible. */
+val cap_reg_name : regidx -> string
+function cap_reg_name(r) = reg_name(r)

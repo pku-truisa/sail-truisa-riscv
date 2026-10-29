@@ -89,10 +89,11 @@ union clause instruction = CADD : (regidx, regidx, regidx)
  */
 function clause execute (CADD(cd, cs1, rs2)) = {
   let cs1_val = C(cs1);
-  // The pointer delta is taken modulo 2^VA, exactly like CHERI's
-  // `cap.address + delta`: negative offsets wrap. XLEN > VA here, so the
-  // truncation is explicit -- CHERI needs none because cap_addr_width == xlen.
-  let rs2_val : CapAddrBits = X(rs2)[truisa_address_width - 1 .. 0];
+  /* ⛔ The delta is the WHOLE XLEN register, not its low VA bits (ADR-0029 decision
+   * 10.1). Truncating here would map 2^48 + 1 onto +1 and silently disable criterion
+   * (3): the address would wrap instead of poisoning. Wrapping is handled inside the
+   * operator, on a 65-bit sum, where the field boundary is still visible. */
+  let rs2_val = X(rs2);
 
   let newCap = incCapAddrChecked(cs1_val, rs2_val);
 
@@ -117,9 +118,10 @@ union clause instruction = CADDI : (regidx, regidx, bits(12))
  */
 function clause execute (CADDI(cd, cs1, imm)) = {
   let cs1_val = C(cs1);
-  // sign_extend keeps a negative immediate negative; truncating to VA bits
-  // afterwards still preserves the sign, because |imm| <= 2048 << 2^(VA-1).
-  let immBits : CapAddrBits = sign_extend(imm)[truisa_address_width - 1 .. 0];
+  /* sign_extend keeps a negative immediate negative. No truncation to VA bits: the
+   * operator takes an XLEN delta (ADR-0029 decision 10.1), and |imm| <= 2048 is far
+   * below 2^47, so the sign survives the widening anyway. */
+  let immBits : xlenbits = sign_extend(imm);
 
   let newCap = incCapAddrChecked(cs1_val, immBits);
 
