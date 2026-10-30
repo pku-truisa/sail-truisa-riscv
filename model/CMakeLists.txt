@@ -181,11 +181,20 @@ set(sail_common
     )
 
     set(truisa_vm_srcs
-        "truisa/truisa_vmem_ptw.sail"
+        # D-161: the five positions that used to mirror cheri/cheri_vmem_*.sail now take
+        # the BASE riscv_vmem_*.sail as-is (改链 -- a path string, zero bytes changed in
+        # model/ root). model/cheri/ stays as the blueprint: not in the chain, not deleted.
+        "riscv_vmem_ptw.sail"
         "riscv_vmem_pte_types.sail"
-        "truisa/truisa_vmem_pte_types_ext.sail"
-        "truisa/truisa_vmem_pte_validity_ext.sail"
+        "riscv_vmem_pte_types_ext.sail"
+        "riscv_vmem_pte_validity_ext.sail"
         "riscv_vmem_pte.sail"
+        # ⚠️ The ONE exception, permitted by D-161 section 3 乙: the base file has a type
+        # error at :45 -- `not(plat_enable_dirty_update())` applies an argument list to a
+        # `let ... : bool` value (riscv_platform.sail:120) -- and model/ root may not be
+        # edited (ADR-0024 11.4b). This copy is the base with that one empty argument list
+        # removed. The file header carries the measurement and the two conditions under
+        # which it must be deleted again.
         "truisa/truisa_vmem_pte_ext.sail"
         "riscv_vmem_tlb.sail"
         "riscv_vmem.sail"
@@ -217,7 +226,10 @@ set(sail_common
         "riscv_callbacks.sail"
         "truisa/truisa_reg_type.sail"
         "riscv_freg_type.sail"
-        "truisa/truisa_vmem_types.sail"
+        # D-161: base as-is -- this was a byte-for-byte copy of riscv_vmem_types.sail, so
+        # swapping the path changes nothing at all. Types only (is_sv_mode / pt_bits /
+        # ext_access_type); the position is unchanged, so it is still ahead of riscv_regs.sail.
+        "riscv_vmem_types.sail"
         "riscv_regs.sail"
         # ⚠️ NOT riscv_sys_regs_types.sail: that upstream file defines `bitfield Seccfg`
         # at :33, and `riscv_sys_regs.sail:321` defines it AGAIN -> "name is already
