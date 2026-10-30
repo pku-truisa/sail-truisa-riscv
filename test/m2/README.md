@@ -13,8 +13,12 @@ script. See the module docstring for the exact loader requirements, which were r
 
 ```sh
 MODEL_SHA=$(git rev-parse --short HEAD) ./test/m2/run.sh
-./test/m2/run.sh --csv docs/test/runs/<date>-<sha>.csv    # archive a record
+./test/m2/run.sh --csv docs/test/runs/<date>-<sha>-v<N>.csv    # archive a record
 ```
+
+⚠️ Record naming is `<date>-<model@sha>-v<N>.csv`, where `N` is the **case-set version**
+(`D-182` ruling 2). Adding/removing a case bumps `N`; changing an expectation does not.
+The current version lives in one place only: `docs/test/plan/README.md`.
 
 `run.sh` builds the ELFs, runs each case without `--inst-limit` (L1 trap 6: a
 truncated run prints `rc=0` and hides a dead HTIF), compares the signature against
@@ -34,8 +38,16 @@ problem (mostly: no emulator built).
 
 ⚠️ `u4` is the only case that needs **two** signature words (the criterion is a relation
 between two points, so one word cannot carry it). `expect.csv` expresses that with a `/`
-between fields and `run.sh` reads exactly that many 8-byte words from the signature area.
+between fields and `run.sh` reads exactly `words` 8-byte words from the signature area.
 The six CSV columns do not change.
+
+⚠️ **`phase` column.** `u1` and `u4` carry `phase=A`: their expected *absolute* values
+contain `pac`, which is produced by `signPtr` and includes `salt`. In phase A `salt` is
+zeros so the values are stable; **in phase B they will change** and a pinned absolute would
+turn the suite red while the model is fine. `D-182` ruling 3: the *relation* is the
+criterion (long-lived), the absolute is a phase-A guard. `run.sh` prints a warning listing
+every `phase=A` case on each run, so clearing that list is the "ready for phase B" check.
+⚠️ `D-182` only named `u4`, but `u1` has the same property (`0x98C8…` contains `pac=0xC8`).
 
 ⚠️ `u4`'s first expectation was **wrong, and it was our mistake**: we pinned
 `0x…0008 / 0x…0010`, i.e. we mistook U1's post-`CADD` address for the pre-`CADD` snapshot.

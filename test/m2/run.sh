@@ -68,6 +68,12 @@ SIM_SIZE=$(wc -c < "$SIM" | tr -d ' ')
 
 mkdir -p "$OUT/lib" || die "建不了产物目录：$OUT"
 
+# 运行起止时间：⛔ 这不是装饰 —— `D-182` §六.1 指出，"两份 CSV 的 sha256 相同"能证
+# 零行为变化的**前提是 meta.txt 是这次真跑出来的**。若 meta.txt 也是复制来的，那套证据就空转。
+# ⇒ 记到秒的起止时间 ＋ 实际耗时，复制不出来（复制两份会连时间一起复制，但与文件 mtime 不符）。
+STARTED_AT=$(date '+%Y-%m-%d %H:%M:%S.%N %z')
+START_EPOCH=$(date +%s.%N)
+
 # 期望值文件归一化：去 BOM（部分编辑器会写 EF BB BF，会把首行注释读成用例名）、去 CR。
 # ⛔ 只做这两件事，不改任何期望值本身。
 EXPECT_CLEAN="$OUT/.expect.txt"
@@ -101,18 +107,30 @@ printf 'case,rc,trap,signature,expect,pass\n' > "$CSV_TMP" || die "写不了 $CS
 # ⛔ 不许"静默降级"：一条用例的判据是几个字，必须显式写在 words 列里，
 #    且与 expect 里的字段数一致。否则把 u4 的 expect 砍成一个字，判据会悄悄
 #    从"两个位点"退化成"一个字"，照样判 PASS（D-176 §六.2 立为通则的那类）。
+#
+# 四列：case,expect,words,phase
+#   phase=A ＝ ⭐ 这一行的**绝对值**只是「阶段 A 快照」（`D-182` §4.2）：关系判据长期有效，
+#             绝对值只在阶段 A 成立（`pac` 含 `salt`；阶段 B 换真 `salt` 后必变）。
+#             ⇒ **进阶段 B 前必须把这一行摘掉或改成关系判据**，否则会出假红灯。
+#             phase='-' ＝ 与 `salt` 无关。
 check_expect_file() {
     n=0
-    while IFS=, read -r name expect words extra; do
+    PHASE_A_CASES=
+    while IFS=, read -r name expect words phase extra; do
         case "$name" in
             ''|'#'*) continue ;;
             case) continue ;;          # 表头
         esac
         printf '%s' "$name" | grep -qE '^[A-Za-z0-9_.-]+$' \
             || die "expect.csv 用例名不合法：$name"
-        [ -n "${words:-}" ] || die "expect.csv 缺 words 列：$name（格式：case,expect,words）"
-        [ -z "${extra:-}" ] || die "expect.csv 列多于三列：$name"
+        [ -n "${words:-}" ] || die "expect.csv 缺 words 列：$name（格式：case,expect,words,phase）"
+        [ -z "${extra:-}" ] || die "expect.csv 列多于四列：$name"
         printf '%s' "${words}" | grep -qE '^[0-9]+$' || die "expect.csv 的 words 不是整数：$name,$words"
+        case "${phase:-}" in
+            A) PHASE_A_CASES="${PHASE_A_CASES}${PHASE_A_CASES:+,}$name" ;;
+            -) ;;
+            *) die "expect.csv 的 phase 只能是 A 或 -：$name,${phase:-<空>}" ;;
+        esac
         if [ "$expect" = "-" ]; then
             [ "$words" = "1" ] || die "expect.csv：expect='-' 时 words 必须是 1：$name"
         else
@@ -129,6 +147,10 @@ check_expect_file
 printf 'model@%s  sim=%s (%s B)  out=%s\n' "$MODEL_SHA" "$SIM" "$SIM_SIZE" "$OUT"
 [ "$MODEL_SHA" = "unknown" ] && \
     printf '⚠️  这不是 git 树，模型版本未知（D-106）⇒ 用 MODEL_SHA=<sha> 重跑，⛔ 别把本轮记录当基线\n'
+if [ -n "$PHASE_A_CASES" ]; then
+    printf '⚠️  phase=A 快照：%s —— 其绝对值只在阶段 A 成立（pac 含 salt）\n' "$PHASE_A_CASES"
+    printf '    进阶段 B 前必须摘掉这些绝对值（只留关系判据），否则会出假红灯（D-182 §4.2）\n'
+fi
 printf '\n'
 
 FAILED=0
@@ -136,7 +158,7 @@ TOTAL=0
 
 # ---------------------------------------------------------------- 逐例执行
 # expect.csv 的行序就是执行序；跳过 # 注释与表头
-while IFS=, read -r name expect words; do
+while IFS=, read -r name expect words phase; do
     case "$name" in
         ''|'#'*) continue ;;
         case) continue ;;      # 表头
@@ -214,7 +236,13 @@ fi
     printf 'cases=%s\n' "$TOTAL"
     printf 'failed=%s\n' "$FAILED"
     printf 'timeout_secs=%s\n' "$TIMEOUT_SECS"
-    printf 'date=%s\n' "$(date '+%Y-%m-%d %H:%M:%S %z')"
+    # ⭐ 起止时间＋耗时：`D-182` §六.1 要求"复制不出来的那种"字段。
+    #    复制一份 meta.txt 会连时间一起复制，但与文件 mtime／两份耗时的一致性对不上。
+    printf 'started_at=%s\n' "$STARTED_AT"
+    printf 'finished_at=%s\n' "$(date '+%Y-%m-%d %H:%M:%S.%N %z')"
+    printf 'duration_s=%s\n' "$(awk -v a="$START_EPOCH" -v b="$(date +%s.%N)" 'BEGIN{printf "%.3f", b-a}')"
+    printf 'phase_a_cases=%s\n' "${PHASE_A_CASES:--}"
+    printf 'timeout_cmd=%s\n' "$(command -v timeout)"
     printf 'host=%s\n' "$(uname -sr)"
 } > "$OUT/meta.txt"
 
