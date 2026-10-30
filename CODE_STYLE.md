@@ -105,21 +105,45 @@ point neither model can be checked on its own.
    "file responsibility table" that is inferred from names has already produced
    one wrong refactor.
 
-7. **CMake source order is load-bearing for ordinary functions.** Sail resolves
-   cross-file names in file order, so where a TruISA file sits relative to the
-   base file it talks to is part of its meaning. Three cases, and they do not
-   agree with each other:
+7. **Source order is load-bearing for ordinary functions -- across files AND within
+   one.** Sail resolves names by text position, so where a definition sits relative
+   to its use is part of its meaning. Two scopes:
+
+   | Scope | Rule |
+   |---|---|
+   | **Across files** | the file holding the definition must come **before** the file that uses it |
+   | **Within one file** | the definition must come **before** the statement that uses it |
+
+   Three relationships decide which side the TruISA file goes on:
 
    | Relationship | Order | Example |
    |---|---|---|
-   | **Override** -- the TruISA file redefines something the base already defines | TruISA file **after** the base (last wins) | `truisa_sys_regs.sail` after `riscv_sys_regs.sail` |
-   | **Supply** -- the base *calls* something nothing defines | TruISA file **before** the base | `truisa_sys_regs_access.sail` before `riscv_sys_regs_access.sail` (it supplies `read_stvec_utvec`) |
-   | **Scattered clause** -- `is_CSR_defined`, `csr_name_map` | anywhere, but between `riscv_csr_begin.sail` and `riscv_csr_end.sail` | `truisa_csr_ext.sail` next to `riscv_csr_end.sail` |
+   | **Override** -- redefines something the base defines | TruISA **after** base | truisa_sys_regs.sail after riscv_sys_regs.sail |
+   | **Supply** -- the base *calls* something nothing defines | TruISA **before** base | truisa_sys_regs_access.sail before its consumer |
+   | **Scattered clause** -- is_CSR_defined, csr_name_map | anywhere between csr_begin and csr_end | truisa_csr_ext.sail |
 
-   ⚠️ Measured, not inferred: with the supply file placed *after* its consumer the
-   build stops at `Function read_stvec_utvec not found` even though the
-   definition is in the chain. The general rule "a swap keeps its position" is
-   therefore only true for same-position replacement.
+   ⚠️ Measured twice, not inferred. Across files: with the supply file placed after
+   its consumer the build stops at `Function read_stvec_utvec not found` even though
+   the definition is in the chain. Within one file: moving the same definition below
+   `get_stvec` reproduces the identical error, only now pointing inside that file.
+   Both mean "a swap keeps its position" is true only for same-position replacement,
+   and that a same-file reordering is **not** a harmless defensive move.
+
+8. **Before copying a base file into a `truisa_` mirror, ask whether it has an
+   unresolved dependency.** The two answers lead to opposite actions:
+
+   | The base file... | Do | Example |
+   |---|---|---|
+   | references something **undefined** in the tree | TruISA supplies it, base stays **out** of the chain | `riscv_sys_regs_access.sail` -- its xTVT block needs `legalize_tvt`/`register mtvt`, which do not exist |
+   | has **no** such reference | **use the base file as-is**, do not copy | `riscv_sys_exceptions.sail` -- defines `type ext_exception = unit` and stands on its own |
+
+   One-line test: `grep` the candidate file for symbols with no definition anywhere
+   outside `model/cheri/`. Any hit means it cannot be used as-is.
+
+   ⚠️ This rule exists because the opposite mistake was made three times in one
+   session: an empty `truisa_*` placeholder sat in the chain while the base file that
+   actually defines what the chain needs was left out. The symptom is always a
+   dangling name much later in the build, never next to the placeholder.
 
 ### Identifier naming (TruISA addition)
 

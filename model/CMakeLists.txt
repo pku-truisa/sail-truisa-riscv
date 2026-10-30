@@ -154,7 +154,13 @@ set(sail_common
         # changes (ADR "xTVT ruling 丁").
         "truisa/truisa_sys_regs_access.sail"
         "riscv_sys_regs_access_common.sail"
-        "truisa/truisa_sys_exceptions.sail"
+        # Base file used as-is: it defines `type ext_exception = unit` (line 11) which
+        # riscv_sync_exception.sail needs, and it carries no unresolved dependency of its
+        # own -- so the rule in CODE_STYLE.md fork rule 8 applies: if the base file has no
+        # reference to something undefined, use the base file; do not copy it into a
+        # truisa_ mirror. (Contrast riscv_sys_regs_access.sail, whose xTVT block does have
+        # such a dependency, which is why THAT one is supplied by truisa/ instead.)
+        "riscv_sys_exceptions.sail"
         "riscv_sync_exception.sail"
         "riscv_zihpm.sail"
         "riscv_sscofpmf.sail"
