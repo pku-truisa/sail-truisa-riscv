@@ -298,7 +298,12 @@ set(sail_common
     set(truisa_step_srcs
         "riscv_step_common.sail"
         "truisa/truisa_step_ext.sail"
-        "truisa/truisa_decode_ext.sail"
+        # D-10: base as-is. Its two hooks are `ext_decode_compressed = encdec_compressed(bv)`
+        # and `ext_decode = encdec(bv)`; both scattered mappings are declared by
+        # riscv_insts_begin.sail, which is on the chain (:151), so there is no unresolved
+        # reference and no name collision. Shape checked: bits(16) -> instruction matches the
+        # call site riscv_step.sail:101. Must stay ahead of riscv_step.sail (source order).
+        "riscv_decode_ext.sail"
         "riscv_fetch_rvfi.sail"
         "riscv_fetch.sail"
         "riscv_step.sail"
