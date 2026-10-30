@@ -159,6 +159,31 @@ point neither model can be checked on its own.
    that actually defines what the chain needs was left out. The symptom is always
    a dangling name much later in the build, never next to the placeholder.
 
+9. **Never claim a value is "discarded" without naming its receiver.** A call that
+   *looks* like a bare statement may be the last expression of its block, and a
+   block's last expression **is** its value -- covering `match` arms. So before
+   writing "the return value is dropped", find one of the three receivers:
+   right-hand side of a `let`, an argument position, or the final expression of
+   the enclosing block.
+
+   | Claim | Check |
+   |---|---|
+   | "the caller never sets the PC" | `grep -n "set_next_pc(<fn>" model/riscv_insts_base.sail` -- a hit means **someone takes the value** |
+   | "this function returns `unit`" | read the `val`/`function` signature, ⛔ not the shape of the `match` |
+   | "the value is dropped" | quote the receiver's line number in the message; **no line number, no claim** |
+
+   ⚠️ This rule exists because the opposite was asserted about
+   `prepare_xret_target`: `prepare_xret_target(Machine)` sits alone on its line at
+   `riscv_sys_control.sail:289`, but it is the arm's tail expression and therefore
+   `exception_handler`'s return value, which `riscv_insts_base.sail:547` feeds to
+   `set_next_pc`. An "urgent bug" was filed on the strength of "it looks like a
+   statement". The proposed fix (call `set_next_pc` inside the function) would
+   have run it twice per xRET, and `sail_branch_announce` is **not** idempotent.
+
+   ⭐ Corollary: when a claim depends on a call site, **put the line number in the
+   message**. A conclusion without it costs the other side a full round trip to
+   re-derive the same grep.
+
 ### Identifier naming (TruISA addition)
 
 - **No bare single letters**, unless the letter is a symbol the specification
