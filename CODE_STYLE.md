@@ -9,6 +9,30 @@ For C the formatting rules should be followed where applicable.
 For other languages, follow the standard style for that language if it exists;
 for example, Python should follow the standard PEP-8 style.
 
+## Ownership of `test/**` (TruISA addition, D-174)
+
+`test/**` belongs to the **test group** (`role: test`), not to whoever edits the model.
+Since 2026-10-30 the dev group does **not** modify files under `test/` -- not even to
+"fix them up while passing by". If a model change really does force a test change (an
+instruction's semantics moved), write a letter explaining why and hand it over.
+
+Expected values are out of reach too: the three `M2` signatures live in
+`docs/test/m2-baseline.md`, maintained by the architecture group alone. Finding a
+discrepancy means reporting the measurement, not editing the expectation.
+
+The reason is structural, not personal: the same group used to own the model, the cases
+and the expected values, so nothing prevented "tune the expectation until the case passes".
+
+One carve-out (`D-175`): `test/_fix/<YYYY-MM-DD>-<topic>/` is the dev group's own scratch
+space, for **fix proofs**. Every functional change to `model/**` owes one -- a throwaway
+test with an expected value that shows "this change does what I say it does", along with
+the command, the actual output, and expected-vs-actual pasted into the reply letter. It is
+not a regression case and never enters the baseline; the test group decides whether to
+absorb it, and the expected value of anything absorbed is written by the architects alone.
+Fix proofs are therefore the only place where the dev group sets an expected value itself.
+A purely mechanical change (comment, rename, deleting an empty placeholder) needs none --
+the test is "will something that used to fail now succeed?"
+
 ## Formatting
 
 - Block-level indentation uses two spaces
