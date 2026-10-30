@@ -42,15 +42,15 @@ interactive proof (in Isabelle, Rocq, and Lean), support proof about binary code
 Install [Sail](https://github.com/rems-project/sail/). On Linux you can download a [binary release](https://github.com/rems-project/sail/releases) (strongly recommended), or you can install from source [using opam](https://github.com/rems-project/sail/blob/sail2/INSTALL.md). Then:
 
 ```
-$ ./build_simulators.sh
+$ ./build_emulators.sh
 ```
 
 will build the simulator at `build/c_emulator/sail_riscv_sim`.
 
 If you get an error message saying `sail: unknown option '--require-version'.` it's because your Sail compiler is too old. You need version 0.19.1 or later.
 
-By default `build_simulators.sh` will download and build [libgmp](https://gmplib.org/).
-To use a system installation of libgmp, run `env DOWNLOAD_GMP=FALSE ./build_simulators.sh` instead.
+By default `build_emulators.sh` will download and build [libgmp](https://gmplib.org/).
+To use a system installation of libgmp, run `env DOWNLOAD_GMP=FALSE ./build_emulators.sh` instead.
 
 ### Executing test binaries
 

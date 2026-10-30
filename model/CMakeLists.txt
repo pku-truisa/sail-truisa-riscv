@@ -287,246 +287,36 @@ foreach (variant IN ITEMS "" "smt" "rocq" "rmem" "lean" "lem" "isabelle")
         continue()
     endif()
 
-    set(cheri_cap_impl
-        "cheri/cheri_prelude_64.sail"
-        "cheri/cheri_prelude_128.sail"
-        "cheri/cheri_prelude_xlen.sail"
-    )
+    # The CHERI source sets used to live here: cheri_cap_impl / sail_check_srcs /
+    # vext_srcs / sail_default_inst / sail_seq_inst(_srcs) / sail_sys_srcs /
+    # sail_vm_srcs / prelude / sail_regs_srcs / sail_arch_srcs / sail_step_srcs /
+    # sail_cfg_srcs / sail_model_srcs. They are gone because this tree builds only the
+    # TruISA model (ADR-0024 decision 11) -- keeping them meant a build directory
+    # configured before the switch could still produce a CHERI simulator, silently.
+    # model/cheri/*.sail stays as reference material (the two-tier reading of ADR-0024
+    # needs it for line-by-line comparison); it is simply no longer reachable from here.
 
-    # Instruction sources, depending on target
-    set(sail_check_srcs
-        "riscv_addr_checks_common.sail"
-        "cheri/cheri_addr_checks.sail"
-    )
-
-    set(vext_srcs
-        "riscv_insts_vext_utils.sail"
-        "riscv_insts_vext_fp_utils.sail"
-        "riscv_insts_vext_vset.sail"
-        "riscv_insts_vext_arith.sail"
-        "riscv_insts_vext_fp.sail"
-        "riscv_insts_vext_mem.sail"
-        "riscv_insts_vext_mask.sail"
-        "riscv_insts_vext_vm.sail"
-        "riscv_insts_vext_fp_vm.sail"
-        "riscv_insts_vext_red.sail"
-        "riscv_insts_vext_fp_red.sail"
-    )
-
-    set(sail_default_inst
-        "riscv_insts_base.sail"
-        "riscv_insts_zifencei.sail"
-        "riscv_insts_zaamo.sail"
-        "riscv_insts_zalrsc.sail"
-        "riscv_insts_zca.sail"
-        "riscv_insts_mext.sail"
-        "riscv_insts_zicsr.sail"
-        "riscv_insts_hext.sail"
-        "riscv_insts_reserved_fence.sail"
-        "cheri/cheri_csr_op.sail"
-        "riscv_insts_fext.sail"
-        "riscv_insts_zcf.sail"
-        "riscv_insts_dext.sail"
-        "riscv_insts_zcd.sail"
-        "riscv_insts_svinval.sail"
-        "riscv_insts_zba.sail"
-        "riscv_insts_zbb.sail"
-        "riscv_insts_zbc.sail"
-        "riscv_insts_zbs.sail"
-        "riscv_insts_zcb.sail"
-        "riscv_insts_zfh.sail"
-        # Zfa needs to be added after fext, dext and Zfh (as it needs
-        # definitions from those)
-        "riscv_insts_zfa.sail"
-        "riscv_insts_zkn.sail"
-        "riscv_insts_zks.sail"
-        "riscv_insts_zbkb.sail"
-        "riscv_insts_zbkx.sail"
-        "riscv_insts_zicond.sail"
-        ${vext_srcs}
-        "riscv_insts_zicbom.sail"
-        "riscv_insts_zicboz.sail"
-        "riscv_insts_zawrs.sail"
-        "riscv_insts_zvbb.sail"
-        "riscv_insts_zvbc.sail"
-        "riscv_insts_zvkg.sail"
-        "riscv_insts_zvkned.sail"
-        "riscv_insts_zvknhab.sail"
-        "riscv_insts_zvksed.sail"
-        "riscv_insts_zvksh.sail"
-        "cheri/cheri_insts_begin.sail"
-        "cheri/cheri_insts.sail"
-        "cheri/cheri_insts_cext.sail"
-        "cheri/cheri_insts_zba.sail"
-        "cheri/cheri_insts_end.sail"
-        # Zimop and Zcmop should be at the end so they can be overridden by earlier extensions
-        "riscv_insts_zimop.sail"
-        "riscv_insts_zcmop.sail"
-    )
-
-    if (variant STREQUAL "rmem")
-        set(sail_seq_inst
-            ${sail_default_inst}
-            "riscv_jalr_rmem.sail"
-            "riscv_insts_rmem.sail"
-        )
-    else()
-        set(sail_seq_inst
-            ${sail_default_inst}
-            "riscv_jalr_seq.sail"
-        )
+    # Final file list. This tree builds only the TruISA model.
+    if (NOT TRUISA)
+        # Kept as an explicit failure rather than simply removing the check: CMake
+        # caches option() values, so a build directory configured while the CHERI
+        # chain still existed keeps TRUISA=OFF no matter what the default says. Without
+        # this branch such a tree fails much later with an unset-variable error that
+        # says nothing about the real cause.
+        message(FATAL_ERROR
+            "TRUISA=OFF is no longer supported: this tree builds only the TruISA model "
+            "(ADR-0024 decision 11). If this build directory was configured before the "
+            "switch, delete it and run ./build_emulators.sh again.")
     endif()
 
-    set(sail_seq_inst_srcs
-        "riscv_insts_begin.sail"
-        ${sail_seq_inst}
-        "riscv_insts_end.sail"
-        "cheri/cheri_csr_ext.sail"
-        "riscv_csr_end.sail"
+    set(sail_srcs
+        ${truisa_arch_srcs}
+        ${truisa_seq_inst_srcs}
+        ${truisa_step_srcs}
+        ${truisa_cfg_srcs}
+        ${truisa_model_srcs}
+        "main.sail"
     )
-
-    set(sail_sys_srcs
-        "riscv_vext_control.sail"
-        "cheri/cheri_sys_regs_access.sail"
-        "riscv_sys_regs_access_common.sail"
-        "cheri/cheri_sys_exceptions.sail"
-        "riscv_sync_exception.sail"
-        "riscv_zihpm.sail"
-        "riscv_sscofpmf.sail"
-        "riscv_zkr_control.sail"
-        "riscv_zicntr_control.sail"
-        "riscv_softfloat_interface.sail"
-        "riscv_fdext_regs.sail"
-        "riscv_fdext_control.sail"
-        "riscv_smcntrpmf.sail"
-        "riscv_pma.sail"
-        "riscv_svpbmt.sail"
-        "riscv_sys_reservation.sail"
-        "riscv_sys_control.sail"
-    )
-
-    set(sail_vm_srcs
-        "cheri/cheri_vmem_ptw.sail"
-        "riscv_vmem_pte_types.sail"
-        "cheri/cheri_vmem_pte_types_ext.sail"
-        "cheri/cheri_vmem_pte_validity_ext.sail"
-        "riscv_vmem_pte.sail"
-        "cheri/cheri_vmem_pte_ext.sail"
-        "riscv_vmem_tlb.sail"
-        "riscv_vmem.sail"
-        "riscv_vmem_utils.sail"
-        "riscv_vmem_access.sail"
-    )
-
-    set(prelude
-        "prelude.sail"
-        "riscv_errors.sail"
-        "range_util.sail"
-        "riscv_xlen.sail"
-        "riscv_flen.sail"
-        "riscv_vlen.sail"
-        "cheri/cheri_prelude.sail"
-        "cheri/cheri_types.sail"
-        ${cheri_cap_impl}
-        "prelude_mem_addrtype.sail"
-        "cheri/cheri_mem_metadata.sail"
-        "prelude_mem.sail"
-        "arithmetic.sail"
-        "cheri/cheri_cap_common.sail"
-        "rvfi_dii.sail"
-        "rvfi_dii_v1.sail"
-        "rvfi_dii_v2.sail"
-    )
-
-    set(sail_regs_srcs
-        "riscv_callbacks.sail"
-        "cheri/cheri_reg_type.sail"
-        "riscv_freg_type.sail"
-        "cheri/cheri_vmem_types.sail"
-        "riscv_regs.sail"
-        "cheri/cheri_sys_regs_types.sail"
-        "cheri/cheri_sys_regs_xstatus.sail"
-        "riscv_sys_regs.sail"
-        "cheri/cheri_sys_regs_envcfg.sail"
-        "riscv_pmp_regs.sail"
-        "riscv_pmp_control.sail"
-        "cheri/cheri_sys_regs.sail"
-        "cheri/cheri_regs.sail"
-        "riscv_pc_access.sail"
-        "riscv_vreg_type.sail"
-        "riscv_vext_regs.sail"
-    )
-
-    set(sail_arch_srcs
-        ${prelude}
-        "riscv_types_common.sail"
-        "cheri/cheri_riscv_types.sail"
-        "riscv_extensions.sail"
-        "riscv_types.sail"
-        "riscv_csr_begin.sail"
-        "riscv_convert_invalid_addr.sail"
-        ${sail_regs_srcs}
-        ${sail_sys_srcs}
-        "riscv_platform.sail"
-        ${sail_check_srcs}
-        "riscv_sstc.sail"
-        "riscv_mem.sail"
-        "cheri/cheri_mem.sail"
-        "riscv_inst_retire.sail"
-        ${sail_vm_srcs}
-        # Shared/common code for the cryptography extension.
-        "riscv_types_kext.sail"
-        "riscv_zvk_utils.sail"
-    )
-
-    set(sail_step_srcs
-        "riscv_step_common.sail"
-        "cheri/cheri_step_ext.sail"
-        "cheri/cheri_decode_ext.sail"
-        "riscv_fetch_rvfi.sail"
-        "riscv_fetch.sail"
-        "riscv_step.sail"
-    )
-
-    if (variant STREQUAL "rocq" OR variant STREQUAL "lean")
-        list(APPEND sail_step_srcs
-            "riscv_termination.sail"
-        )
-    endif()
-
-    set(sail_cfg_srcs
-        "riscv_validate_config.sail"
-        "riscv_device_tree.sail"
-    )
-
-    set(sail_model_srcs
-        "riscv_model.sail"
-    )
-
-    # Final file list.
-    if (TRUISA)
-        # Line for line the same composition as the CHERI branch below, with the
-        # truisa_* sub-sets instead. Keeping the shape identical is the point: a
-        # reader can compare the two branches without holding a flattened list in
-        # their head, and a sub-set added on one side is visibly missing on the other.
-        set(sail_srcs
-            ${truisa_arch_srcs}
-            ${truisa_seq_inst_srcs}
-            ${truisa_step_srcs}
-            ${truisa_cfg_srcs}
-            ${truisa_model_srcs}
-            "main.sail"
-        )
-    else()
-        set(sail_srcs
-            ${sail_arch_srcs}
-            ${sail_seq_inst_srcs}
-            ${sail_step_srcs}
-            ${sail_cfg_srcs}
-            ${sail_model_srcs}
-            "main.sail"
-        )
-    endif()
 
     # Generate C code from Sail model
     if (NOT variant)

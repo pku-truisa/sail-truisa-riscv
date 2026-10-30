@@ -89,9 +89,10 @@ option(DOWNLOAD_GMP "Download libgmp and build the library locally instead of us
 # upstream RISC-V tree and differ only in which file chain model/CMakeLists.txt
 # lists: CHERI pulls in cheri/*.sail, TruISA pulls in model/truisa/*.sail and
 # none of cheri/. See model/truisa/README.md and the "Fork rule" in
-# CODE_STYLE.md. Default ON: the CHERI chain is no longer a build target
-# (ADR-0024 decision 11). The value still has to be passed explicitly by
-# anything that keeps its own cache, and build_truisa.sh still does so.
+# CODE_STYLE.md. This tree builds only the TruISA model (ADR-0024 decision 11), so
+# the default is ON and model/CMakeLists.txt rejects OFF outright -- a build
+# directory configured before the switch keeps its cached OFF and would otherwise
+# produce a CHERI simulator with no error at all.
 option(TRUISA "Build the TruISA fork instead of the CHERI model" ON)
 if (DOWNLOAD_GMP)
     include(ExternalProject)
