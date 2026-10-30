@@ -122,3 +122,11 @@ function ext_exc_type_to_str(e) =
 type ext_ptw = unit
 type ext_csr_exc_type = unit
 type ext_fetch_addr_error = unit
+
+/* D-162 (裁甲): the fourth atom of the same family, byte-for-byte upstream
+ * (riscv_types_ext.sail:36). It is a `let`, not a type, which is exactly why the
+ * 2026-10-30 patch that took the three types above missed it -- the rule was "take the
+ * missing names", and `init_ext_ptw` is a missing *value*.
+ *   user: riscv_vmem.sail:346 / :359 / :373 -- the PTW accumulator's initial value.
+ * Cost of not having it: `Identifier init_ext_ptw is unbound` at riscv_vmem.sail:346. */
+let init_ext_ptw : ext_ptw = ()

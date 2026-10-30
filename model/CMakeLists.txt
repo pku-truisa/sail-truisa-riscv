@@ -43,6 +43,17 @@ set(sail_common
     # Instruction sources, depending on target
     set(truisa_check_srcs
         "riscv_addr_checks_common.sail"
+        # D-162 (裁甲): the base file enters as-is. Its ten ext_* hooks are what upstream
+        # leaves for extensions; TruISA has no override yet, so they land as permissive
+        # stubs and the model can type-check past riscv_mem.sail:161.
+        # ⚠️ ORDER: the _common file above DECLARES ext_check_phys_mem_read/_write with
+        # `val`; this file DEFINES them with `function`. That is Sail's declare/define pair,
+        # not a collision -- which is why "two names already defined" in the 2026-10-30
+        # report was wrong (a `val` is not a definition).
+        "riscv_addr_checks.sail"
+        # ⛔ Defines nothing; it carries the TRUISA DELTA (ADR-0017) block that records all
+        # ten hooks as 桩态 and names A-3 as the replacement. Kept on the chain so it sits
+        # next to what it annotates instead of drifting into an out-of-chain file.
         "truisa/truisa_addr_checks.sail"
     )
 
