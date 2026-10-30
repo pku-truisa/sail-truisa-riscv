@@ -81,7 +81,13 @@ set(sail_common
         "riscv_insts_zicsr.sail"
         "riscv_insts_hext.sail"
         "riscv_insts_reserved_fence.sail"
-        "truisa/truisa_csr_op.sail"
+        # D-168 section 4.1 R1 #8: base as-is, placeholder deleted. riscv_insts_zicsr.sail
+        # DECLARES handle_csr_op (:31) and uses it (:49) but does not define it, so with the
+        # placeholder in this slot the model type-checked and then failed at LINK time with
+        # "undefined reference to zhandle_csr_op" -- a `val` without a body is an external to
+        # Sail. This one-line base file is the definition (it delegates to
+        # default_handle_csr_op, which zicsr defines at :54). It must stay AFTER zicsr.
+        "riscv_csr_op.sail"
         "riscv_insts_fext.sail"
         "riscv_insts_zcf.sail"
         "riscv_insts_dext.sail"
@@ -112,11 +118,14 @@ set(sail_common
         "riscv_insts_zvknhab.sail"
         "riscv_insts_zvksed.sail"
         "riscv_insts_zvksh.sail"
-        "truisa/truisa_insts_begin.sail"
+        # D-168 R1: empty mirror deleted. riscv_insts_begin.sail is on the chain above and supplies
+        # everything this position needs; the placeholder defined nothing.
         "truisa/truisa_inst.sail"
         "truisa/truisa_insts_cext.sail"
-        "truisa/truisa_insts_zba.sail"
-        "truisa/truisa_insts_end.sail"
+        # D-168 R1: empty mirror deleted. riscv_insts_zba.sail is on the chain above and supplies
+        # everything this position needs; the placeholder defined nothing.
+        # D-168 R1: empty mirror deleted. riscv_insts_end.sail is on the chain above and supplies
+        # everything this position needs; the placeholder defined nothing.
         # Zimop and Zcmop should be at the end so they can be overridden by earlier extensions
         "riscv_insts_zimop.sail"
         "riscv_insts_zcmop.sail"
@@ -253,7 +262,8 @@ set(sail_common
         "riscv_sys_regs_envcfg.sail"
         "riscv_pmp_regs.sail"
         "riscv_pmp_control.sail"
-        "truisa/truisa_sys_regs.sail"
+        # D-168 R1: empty mirror deleted. riscv_sys_regs.sail is on the chain above and supplies
+        # everything this position needs; the placeholder defined nothing.
         "truisa/truisa_regs.sail"
         # Shared base file, with the fork's CHERI additions stripped in place
         # (PCC / nextPCC / set_next_pcc / force_pc). The CHERI chain is no longer a build
@@ -287,7 +297,8 @@ set(sail_common
         ${truisa_check_srcs}
         "riscv_sstc.sail"
         "riscv_mem.sail"
-        "truisa/truisa_mem.sail"
+        # D-168 R1: empty mirror deleted. riscv_mem.sail is on the chain above and supplies
+        # everything this position needs; the placeholder defined nothing.
         "riscv_inst_retire.sail"
         ${truisa_vm_srcs}
         # Shared/common code for the cryptography extension.

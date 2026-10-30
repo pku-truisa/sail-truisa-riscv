@@ -15,6 +15,40 @@
 set -e
 : "${DOWNLOAD_GMP:=TRUE}"
 
+# Dependency completeness (D-168 section 3).
+#
+# A partial copy of this tree is indistinguishable from a working one until the C build
+# reaches softfloat, where it fails with a *source-level* error:
+#     .../source/RISCV/s_propagateNaNF128UI.c:39: fatal error: platform.h: No such file
+# That reads as "upstream softfloat is broken". It is not: platform.h lives in
+# dependencies/softfloat/berkeley-softfloat-3/build/Linux-RISCV-GCC/ and was simply not
+# copied. Measured 2026-10-30 on a node with 445 of the 465 tracked files.
+#
+# Two layers, because some build nodes are plain copies and have no git:
+#   1. if this is a git work tree, compare tracked file count with what is on disk;
+#   2. always assert the handful of files whose absence produces the misleading error.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  want=$(git ls-files dependencies | wc -l)
+  have=$(find dependencies -type f | wc -l)
+  if [ "$want" -ne "$have" ]; then
+    echo "ERROR: dependencies incomplete: git tracks $want files, $have on disk." >&2
+    echo "       Fix with 'git checkout -- dependencies', or re-copy the tree." >&2
+    echo "       Left unchecked, this surfaces as a softfloat error about platform.h." >&2
+    exit 1
+  fi
+fi
+for need in \
+  dependencies/softfloat/CMakeLists.txt \
+  dependencies/softfloat/berkeley-softfloat-3/build/Linux-RISCV-GCC/platform.h \
+  dependencies/softfloat/berkeley-softfloat-3/source/include/softfloat.h
+do
+  if [ ! -f "$need" ]; then
+    echo "ERROR: missing dependency file: $need" >&2
+    echo "       This tree is an incomplete copy; softfloat would fail on platform.h." >&2
+    exit 1
+  fi
+done
+
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DDOWNLOAD_GMP="${DOWNLOAD_GMP}"
 
 # CMake caches option() values, so a build/ directory configured while the CHERI chain
