@@ -15,10 +15,10 @@
 /*  ⚠️⚠️ Having this file does NOT make RV32 build. It only supplies the capability       */
 /*  width. Three things still block RV32, and none of them is a matter of adding files:   */
 /*    - ADR-0003's three VA profiles are 39 / 48 / 57, all wider than 32;                 */
-/*    - the pointer's bit fields (mode 1 + N/C 6 + PAC 8 + reserved 1) eat 16 of 32 bits, */
-/*      leaving 16 for the address;                                                       */
-/*    - truisa_pac_width = 32 - 48 - 1 - 6 = -23, so bits(truisa_pac_width) cannot even   */
-/*      be formed.                                                                        */
+/*    - the pointer's bit fields (mode + N/C truisa_nc_width + PAC                       */
+/*      truisa_pac_width) leave nothing for a 48-bit address;                            */
+/*    - truisa_pac_width = truisa_ptr_width - 48 - 1 - truisa_nc_width = -22 here, so    */
+/*      bits(truisa_pac_width) cannot be formed.                                         */
 /*  Do NOT add `constraint xlen == 64` to silence this: that would lock out the very      */
 /*  direction this file exists for. Do NOT temporarily shrink truisa_address_width to     */
 /*  make RV32 compile either -- the VA profile is a spec decision (ADR-0003), not a       */

@@ -1,6 +1,11 @@
 /*=======================================================================================*/
 /*  TruISA: no in-memory tag -- this file is EMPTY BY DESIGN.                            */
 /*                                                                                       */
+/*  Status: NOT ADOPTED BY DECISION -- stays empty on purpose (D-184).                   */
+/*  TruISA needs neither MEMr_tag nor MEMw_tag (still holds under D-111; see             */
+/*  truisa_mem_metadata.sail:67). This file is the named return point if                 */
+/*  ADR-0001 section 4 (per-16-byte in-memory tag) is ever lifted.                       */
+/*                                                                                       */
 /*  Counterpart: model/cheri/cheri_prelude.sail (12 lines, two declarations).            */
 /*                                                                                       */
 /*  What the blueprint declares:                                                        */
@@ -26,6 +31,8 @@
 /*                                                                                       */
 /*  --------------------------------------------------------------------------------- */
 /*  PAIRED WITH truisa_mem_metadata.sail (position 6) -- read the two together. */
+/*  ⚠️ 前提已废（the old premise was refuted）：见 truisa_mem_metadata.sail:38-46 / D-111；   */
+/*     结论仍成立（the conclusion still holds）——只加不删，保留历史层次（D-184 §6.2）。      */
 /* */
 /*  The reason these two hooks can be left out is that nothing calls them, and the only */
 /*  callers are three lines inside truisa_mem_metadata.sail. That file in turn is empty */

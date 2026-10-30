@@ -115,6 +115,12 @@ point neither model can be checked on its own.
    Do not merge two CHERI files into one TruISA file, and do not move a block
    to another file "because it fits better there".
 
+   ⚠️ One **standing exception**, recorded as existing state (D-184 §6.3), ⛔ not to
+   be reverted: `truisa_inst.sail` merges four CHERI files (`insts` / `_insts_begin`
+   / `_insts_end` / `_insts_zba`). It is noted here so that the next reader does not
+   "restore" the split; ⛔ do not split it back, and do not cite this exception as
+   permission to merge others.
+
 4. **An upstream `riscv_*` / `prelude_*` file that already does the right thing
    is used as-is** -- it gets no `truisa_*` twin. (Example:
    `prelude_mem_metadata.sail` is already the no-metadata version TruISA needs.)
@@ -144,7 +150,7 @@ point neither model can be checked on its own.
    |---|---|---|
    | **Override** -- redefines something the base defines | TruISA **after** base | truisa_sys_regs.sail after riscv_sys_regs.sail |
    | **Supply** -- the base *calls* something nothing defines | TruISA **before** base | truisa_sys_regs_access.sail before its consumer |
-   | **Scattered clause** -- is_CSR_defined, csr_name_map | anywhere between csr_begin and csr_end | truisa_csr_ext.sail |
+   | **Scattered clause** -- is_CSR_defined, csr_name_map | anywhere between csr_begin and csr_end | truisa_csr_ext.sail (pending D-132 / A-5) |
 
    ⚠️ Measured twice, not inferred. Across files: with the supply file placed after
    its consumer the build stops at `Function read_stvec_utvec not found` even though
@@ -207,6 +213,24 @@ point neither model can be checked on its own.
    ⭐ Corollary: when a claim depends on a call site, **put the line number in the
    message**. A conclusion without it costs the other side a full round trip to
    re-derive the same grep.
+
+10. **Comments must not hard-code derived quantities.** Every width, bit sum and
+   arithmetic result written into a comment is a value with an expiry date: change
+   one `type` line in `truisa_cap_common.sail` and the prose around it becomes
+   false **without anything failing**, because comments are not type-checked.
+   Write the symbol, or point at the `type` line — do not write the number.
+
+   | ⛔ Do not write | ✅ Write instead |
+   |---|---|
+   | `mode 1 + N/C 6 + PAC 8 + reserved 1` | `mode + N/C truisa_nc_width + PAC truisa_pac_width` |
+   | `truisa_pac_width = 32 - 48 - 1 - 6 = -23` | `truisa_pac_width = truisa_ptr_width - 48 - 1 - truisa_nc_width` |
+   | "PAC is 9 bits" | "PAC occupies what is left between the label and the address" |
+
+   ⚠️ This rule exists because `truisa_prelude_32.sail` carried **three** expired
+   quantities at the same time: `N/C 6` where the code uses 5, a `reserved 1` that
+   was abolished with red-line 4, and a result of `-23` where the formula gives
+   `-22`. None of the three could ever fail a build. Same lesson as the one behind
+   "writing the term count into a docstring guarantees the docstring will expire".
 
 ### Identifier naming (TruISA addition)
 

@@ -21,10 +21,11 @@ set(sail_common
 #  TruISA file chain: a one-for-one mirror of the CHERI sets above.
 #
 #  Same grouping, same order, same variable names with a truisa_ prefix -- so the
-#  two chains can be read line by line against each other. Every cheri/X.sail
-#  becomes truisa_X.sail; no entry is dropped and none is invented, which is what
-#  makes "which file does TruISA not need" a question answered inside that file
-#  (by staying empty) rather than by silently removing it from the list.
+#  two chains can be read line by line against each other. Every cheri/X.sail that
+#  TruISA needs at this position becomes truisa_X.sail; no entry is dropped and none
+#  is invented, which is what makes "which file does TruISA not need" a question
+#  answered inside that file (by staying empty) rather than by silently removing it
+#  from the list.
 #
 #  ⛔ No cheri/* entry may appear below (see "Fork rule" in CODE_STYLE.md).
 #  ⚠️ This chain does not type-check yet on purpose: the placeholder files are
