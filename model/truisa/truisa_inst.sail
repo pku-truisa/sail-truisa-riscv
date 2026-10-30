@@ -298,9 +298,9 @@ function clause execute (CSUB(rd, cs1, cs2)) = {
 mapping clause encdec = GCBASE(rd, cs1)
   <-> 0b0001000 @ 0b00101 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
 mapping clause encdec = GCADDR(rd, cs1)
-  <-> 0b0001000 @ 0b01001 @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
+  <-> 0b0001000 @ 0b01001 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
 mapping clause encdec = CSUB(rd, cs1, cs2)
-  <-> 0b0001100 @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
+  <-> 0b0001100 @ encdec_reg(cs2) @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
 mapping clause encdec = GCBOUND(rd, cs1)
   <-> 0b0001000 @ 0b01010 @ encdec_reg(cs1) @ 0b000 @ encdec_reg(rd) @ 0b0110011
 

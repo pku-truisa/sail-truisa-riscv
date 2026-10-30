@@ -59,6 +59,16 @@ overload C = {rC_bits, wC_bits, rC, wC}
  *
  * Kept as a distinct name rather than deleting the call sites: the disassembly lines in
  * truisa_inst.sail read `cap_reg_name(cs1)`, which documents that the operand is a
- * pointer, and that is worth keeping visible. */
-val cap_reg_name : regidx -> string
-function cap_reg_name(r) = reg_name(r)
+ * pointer, and that is worth keeping visible.
+ *
+ * ⚠️ It must be a MAPPING, not a function. The blueprint has it as
+ * `mapping cap_reg_name : regidx <-> string` (cheri_regs.sail:40) and the reason is
+ * structural: every `mapping clause assembly` needs the operands to be invertible, so a
+ * plain `function ... -> string` cannot appear in one --
+ *   "cap_reg_name is not a union constructor or mapping in mapping-pattern
+ *    cap_reg_name(cs1)"                                        (measured, 2026-10-30)
+ * The earlier function form was never exercised, because nothing type-checked
+ * truisa_inst.sail until the chain finally reached it. */
+mapping cap_reg_name : regidx <-> string = {
+  r <-> reg_name(r)
+}
