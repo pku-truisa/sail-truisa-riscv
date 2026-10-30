@@ -98,3 +98,27 @@ function ext_exc_type_to_str(e) =
   match e {
     EXC_TRUISA => "truisa",
   }
+
+/*=======================================================================================*
+ * The three extension-stub types that model/riscv_types_ext.sail provides upstream.
+ *
+ * ⚠️ That base file cannot be added to the chain as a whole: it also defines
+ * `ext_exc_type` plus its four conversions, and this file defines those already (the enum
+ * above replaced CHERI's `= unit` placeholder). Adding it whole fails with
+ *
+ *     Cannot define type synonym ext_exc_type, as a type or synonym with that name
+ *     already exists                    -- riscv_types_ext.sail:39
+ *
+ * so the rule "no unresolved dependency, therefore use the base file" is not sufficient
+ * on its own -- it also has to define nothing this chain already defines.
+ *
+ * These three are byte-for-byte the upstream values (`riscv_types_ext.sail:35/57/60`),
+ * and each has a real user on this chain:
+ *   ext_ptw              riscv_sync_exception.sail:14, riscv_vmem_access.sail
+ *   ext_csr_exc_type     riscv_ext_regs.sail:17/24, riscv_inst_retire.sail:26
+ *   ext_fetch_addr_error riscv_step_common.sail:51, riscv_step.sail:15, riscv_addr_checks.sail
+ *=======================================================================================*/
+
+type ext_ptw = unit
+type ext_csr_exc_type = unit
+type ext_fetch_addr_error = unit

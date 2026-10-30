@@ -244,6 +244,14 @@ set(sail_common
         "truisa/truisa_riscv_types.sail"
         "riscv_extensions.sail"
         "riscv_types.sail"
+        # ⛔ NOT riscv_types_ext.sail, although the stub family it carries (ext_ptw,
+        # ext_csr_exc_type, ext_fetch_addr_error) is exactly what the chain is missing.
+        # Five of the ten names it defines -- ext_exc_type and its four conversions --
+        # are ALREADY defined in truisa/truisa_riscv_types.sail, because TruISA replaced
+        # CHERI's `= unit` placeholder with a real enum. Adding the file whole therefore
+        # fails with "Cannot define type synonym ext_exc_type ... already exists"
+        # (measured). The three names the chain does need are supplied from the TruISA
+        # types file instead; see CODE_STYLE fork rule 8, second clause.
         "riscv_csr_begin.sail"
         "riscv_convert_invalid_addr.sail"
         ${truisa_regs_srcs}
