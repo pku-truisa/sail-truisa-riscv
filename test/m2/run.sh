@@ -66,6 +66,10 @@ if [ -z "$MODEL_SHA" ]; then
 fi
 SIM_SIZE=$(wc -c < "$SIM" | tr -d ' ')
 
+# arch@sha：`D-183` §五 建议记录同时写判据版本 —— 判据变了而模型没变，同样要重跑。
+# 模型仓看不到架构仓，所以由调用方用 ARCH_SHA=<sha> 传；⛔ 不猜、不跨仓去找。
+ARCH_SHA=${ARCH_SHA:-unknown}
+
 mkdir -p "$OUT/lib" || die "建不了产物目录：$OUT"
 
 # 运行起止时间：⛔ 这不是装饰 —— `D-182` §六.1 指出，"两份 CSV 的 sha256 相同"能证
@@ -89,6 +93,32 @@ python3 "$SCRIPT_DIR/mkelf.py" "$OUT/lib" > "$OUT/mkelf.log" 2>&1 \
 norm() { printf '%s' "$1" | tr -d ' \t\r\n' | tr -d '/' | tr 'A-F' 'a-f' | sed 's/0x//g'; }
 
 nfields() { printf '%s' "$1" | awk -F/ '{print NF}'; }
+
+# is_aligned <16 位小写 hex> -> bit63==1 即 Aligned 模式
+#   ⚠️ 守门取子集必须按**实测形态**（bit63），⛔ 不能按 `phase` 列 —— 阶段 B 那天
+#   `phase=A` 的行会被摘掉，按列取子集会让守门**跟着一起消失**（判据原文是
+#   "所有 phase=A／Aligned 用例"，Aligned 才是那个不随阶段变的口径）。
+is_aligned() {
+    case "$(printf '%s' "$1" | cut -c1)" in
+        8|9|a|b|c|d|e|f) return 0 ;;
+        *)               return 1 ;;
+    esac
+}
+
+# pac_of <16 位小写 hex> -> `bits 56..48` 的 3 位 hex（纯字符串操作，⛔ 不解析成整数）
+#   16 位 hex 里：d0=bit63..60，d1=bit59..56，d2/d3=bit55..48…
+#   bits 63..57 = d0 整 4 位 ＋ d1 的高 3 位；bits 56..48 = d1 的最低位 ＋ d2 ＋ d3。
+#   ⇒ pac = (d1 的最低位) + d2 + d3  —— 例：0x98C8… ⇒ d1='8'(偶) ⇒ "0" + "c8" = "0c8" = 0xC8。
+#   ⚠️ 阶段 A 的 `salt=0` 时它不是 0 而是 0xC8；"全部为 0" 只能是没加签（见下面的守门）。
+pac_of() {
+    w=$1
+    d1=$(printf '%s' "$w" | cut -c2)
+    case "$d1" in
+        1|3|5|7|9|b|d|f) hi=1 ;;
+        *)               hi=0 ;;
+    esac
+    printf '%s%s' "$hi" "$(printf '%s' "$w" | cut -c3-4)"
+}
 
 get_sig() {
     # 取签名区前 N 个 8 字节字，按 `0x…/0x…` 连起来（N＝expect 里 `/` 分隔的字段数）。
@@ -144,7 +174,9 @@ check_expect_file() {
 
 check_expect_file
 
-printf 'model@%s  sim=%s (%s B)  out=%s\n' "$MODEL_SHA" "$SIM" "$SIM_SIZE" "$OUT"
+printf 'model@%s  arch@%s  sim=%s (%s B)  out=%s\n' "$MODEL_SHA" "$ARCH_SHA" "$SIM" "$SIM_SIZE" "$OUT"
+[ "$ARCH_SHA" = "unknown" ] && \
+    printf '⚠️  没传 ARCH_SHA：记录里判据版本缺失（D-183 §五）⇒ 用 ARCH_SHA=<sha> 重跑\n'
 [ "$MODEL_SHA" = "unknown" ] && \
     printf '⚠️  这不是 git 树，模型版本未知（D-106）⇒ 用 MODEL_SHA=<sha> 重跑，⛔ 别把本轮记录当基线\n'
 if [ -n "$PHASE_A_CASES" ]; then
@@ -155,6 +187,8 @@ printf '\n'
 
 FAILED=0
 TOTAL=0
+PAC_LIST=        # phase=A 用例的 pac 观测，形如 `u1:0c8 u4:0c8 u4:0c8`
+PAC_N=0
 
 # ---------------------------------------------------------------- 逐例执行
 # expect.csv 的行序就是执行序；跳过 # 注释与表头
@@ -213,6 +247,19 @@ while IFS=, read -r name expect words phase; do
     fi
 
     printf '%s,%s,%s,%s,%s,%s\n' "$name" "$rc" "$trap_n" "$got" "$expect" "$pass" >> "$CSV_TMP"
+
+    # ⭐ 跨用例守门（`m2-baseline.md` §6.3）：对**每个 Aligned 形态**的实测字记 pac（`bits 56..48`）。
+    #    ⛔ 不逐条判 pac 的具体值（那是派生量，阶段 B 会变）；只判"一次运行里全部为 0"。
+    #    取子集按 bit63（实测形态），⛔ 不按 phase 列 —— 否则阶段 B 摘掉 phase 时守门会失效。
+    if [ "$expect" != "-" ]; then
+        for w in $(printf '%s' "$got" | tr '/' ' '); do
+            ww=$(printf '%s' "$w" | tr 'A-F' 'a-f' | sed 's/^0x//')
+            [ "${#ww}" -eq 16 ] || continue
+            is_aligned "$ww" || continue
+            PAC_LIST="${PAC_LIST}${PAC_LIST:+ }$name:$(pac_of "$ww")"
+            PAC_N=$((PAC_N + 1))
+        done
+    fi
     if [ "$pass" -eq 1 ]; then
         printf '%-10s PASS  rc=0 trap=0 sig=%s\n' "$name" "$got"
     else
@@ -223,6 +270,22 @@ done < "$EXPECT_CLEAN"
 
 [ "$TOTAL" -gt 0 ] || die "expect.csv 里一条用例都没读到（$EXPECT_FILE）"
 
+# ---------------------------------------------------------------- 跨用例守门
+# `m2-baseline.md` §6.3：一次运行里**所有** phase=A 用例的 pac 不得全为 0。
+# 单条 pac=0 可能是真随机撞上（2^-9），⛔ 不判；**全部为 0** 只能是"没加签"。
+# 这是**套件级**判据，所以它不改任何单条 case 的 pass，而是让整轮 rc=1。
+PAC_ALL_ZERO=0
+if [ "$PAC_N" -gt 0 ]; then
+    all_zero=1
+    for e in $PAC_LIST; do
+        case "$e" in
+            *:000) ;;
+            *)     all_zero=0 ;;
+        esac
+    done
+    [ "$all_zero" -eq 1 ] && PAC_ALL_ZERO=1
+fi
+
 # ---------------------------------------------------------------- 产物
 mv "$CSV_TMP" "$OUT/m2.csv" || die "写不了 $OUT/m2.csv"
 if [ -n "$CSV" ]; then
@@ -231,6 +294,7 @@ fi
 
 {
     printf 'model_sha=%s\n' "$MODEL_SHA"
+    printf 'arch_sha=%s\n' "$ARCH_SHA"
     printf 'sim=%s\n' "$SIM"
     printf 'sim_bytes=%s\n' "$SIM_SIZE"
     printf 'cases=%s\n' "$TOTAL"
@@ -242,15 +306,29 @@ fi
     printf 'finished_at=%s\n' "$(date '+%Y-%m-%d %H:%M:%S.%N %z')"
     printf 'duration_s=%s\n' "$(awk -v a="$START_EPOCH" -v b="$(date +%s.%N)" 'BEGIN{printf "%.3f", b-a}')"
     printf 'phase_a_cases=%s\n' "${PHASE_A_CASES:--}"
+    # 跨用例守门（§6.3）的现场：逐条 pac 值 ＋ 全零判定
+    printf 'pac_observed=%s\n' "${PAC_LIST:--}"
+    printf 'pac_all_zero=%s\n' "$PAC_ALL_ZERO"
     printf 'timeout_cmd=%s\n' "$(command -v timeout)"
     printf 'host=%s\n' "$(uname -sr)"
 } > "$OUT/meta.txt"
 
 printf '\n%d/%d 通过；CSV=%s\n' "$((TOTAL - FAILED))" "$TOTAL" "$OUT/m2.csv"
 [ -n "$CSV" ] && printf '归档 CSV=%s\n' "$CSV"
+if [ "$PAC_N" -gt 0 ]; then
+    printf '跨用例守门（§6.3）：pac 观测 = %s ⇒ %s\n' "$PAC_LIST" \
+        "$([ "$PAC_ALL_ZERO" -eq 1 ] && echo '❌ 全部为 0（没加签）' || echo '非全零 ✅')"
+fi
 
 if [ "$FAILED" -ne 0 ]; then
     printf '\nFAILED: %d 例未过（首因见上，逐例日志在 %s/）\n' "$FAILED" "$OUT"
+    exit 1
+fi
+
+if [ "$PAC_ALL_ZERO" -eq 1 ]; then
+    printf '\nFAILED: 跨用例守门（m2-baseline.md §6.3）—— 所有 phase=A 用例的 pac 全为 0\n'
+    printf '        ⇒ 只能是"没加签"（单条 0 可能是 2^-9 撞上，全部 0 不是偶然）\n'
+    printf '        ⛔ 不许改期望值绕过；报开发组，抄送架构组\n'
     exit 1
 fi
 

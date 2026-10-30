@@ -44,10 +44,21 @@ The six CSV columns do not change.
 ⚠️ **`phase` column.** `u1` and `u4` carry `phase=A`: their expected *absolute* values
 contain `pac`, which is produced by `signPtr` and includes `salt`. In phase A `salt` is
 zeros so the values are stable; **in phase B they will change** and a pinned absolute would
-turn the suite red while the model is fine. `D-182` ruling 3: the *relation* is the
-criterion (long-lived), the absolute is a phase-A guard. `run.sh` prints a warning listing
-every `phase=A` case on each run, so clearing that list is the "ready for phase B" check.
-⚠️ `D-182` only named `u4`, but `u1` has the same property (`0x98C8…` contains `pac=0xC8`).
+turn the suite red while the model is fine. `D-182` ruling 3 / `m2-baseline.md` §6.1: the
+*relation* is the criterion (long-lived), the absolute is a phase-A guard. `run.sh` prints
+a warning listing every `phase=A` case on each run, so clearing that list is the "ready for
+phase B" check. (`D-183` confirmed `u1` belongs there too -- the rule is "any row whose
+expectation contains a derived `pac` value", not "the two rows I happened to name".)
+
+⚠️ **Cross-case guard (`m2-baseline.md` §6.3).** Once the absolutes are dropped, nothing
+would notice "no signing at all" (`pac` always 0), so every run collects `bits 56..48` of
+each **Aligned** word (`bit63=1`) and fails the suite (`rc=1`) if **all** of them are zero.
+A single zero is not judged (a real salt could hit it, ~`2⁻⁹`). The subset is taken by the
+*measured* `bit63`, never by the `phase` column: on phase B those rows lose `phase=A`, and
+a column-based subset would silently disappear along with the guard.
+
+⚠️ `ARCH_SHA=<sha> ./test/m2/run.sh` records the criteria version in `meta.txt`
+(`D-183` §5: criteria can change while the model does not, and that still needs a re-run).
 
 ⚠️ `u4`'s first expectation was **wrong, and it was our mistake**: we pinned
 `0x…0008 / 0x…0010`, i.e. we mistook U1's post-`CADD` address for the pre-`CADD` snapshot.
