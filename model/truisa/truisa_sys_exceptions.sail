@@ -19,6 +19,20 @@
  *  the caller takes the RETURN VALUE as the next PC, see exception_handler), and
  *  unsealCap (TruISA has no sealed capabilities).
  *
+ *  ⭐ WHY THERE IS NO set_next_pc IN THIS FUNCTION -- do not "fix" this by adding one.
+ *  The PC is set by the caller, one level above the ctl_result match:
+ *
+ *      riscv_insts_base.sail:547  set_next_pc(exception_handler(cur_privilege(), CTL_MRET(), PC));
+ *      riscv_insts_base.sail:571  set_next_pc(exception_handler(cur_privilege(), CTL_SRET(), PC));
+ *
+ *  and exception_handler itself is `-> xlenbits` (riscv_sys_control.sail:265), returning
+ *  whatever this function returned. So the chain is: this function returns the target,
+ *  exception_handler returns it unchanged, and the MRET/SRET clause hands it to
+ *  set_next_pc. Adding set_next_pc here as well would run it twice -- convertInvalidAddr
+ *  is idempotent, but sail_branch_announce is not, and the trace would carry two branch
+ *  announcements for one xRET. prepare_trap_vector in riscv_sys_exceptions.sail follows
+ *  the same shape: it returns the vector, the caller sets the PC.
+ *
  *  ⚠️ The User arm: CHERI raises internal_error there. The ruling for this file is
  *  "Machine => mepc, otherwise => sepc", so User falls through to sepc. Unreachable today
  *  -- the only two call sites pass Machine (MRET) and Supervisor (SRET) -- but noted so
