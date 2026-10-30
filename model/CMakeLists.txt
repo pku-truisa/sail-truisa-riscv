@@ -161,6 +161,10 @@ set(sail_common
         # truisa_ mirror. (Contrast riscv_sys_regs_access.sail, whose xTVT block does have
         # such a dependency, which is why THAT one is supplied by truisa/ instead.)
         "riscv_sys_exceptions.sail"
+        # Supplies prepare_xret_target, which this fork moved into the CHERI tree; the
+        # base file above does not define it but riscv_sys_control.sail calls it, so this
+        # one must come before that file (fork rule 7).
+        "truisa/truisa_sys_exceptions.sail"
         "riscv_sync_exception.sail"
         "riscv_zihpm.sail"
         "riscv_sscofpmf.sail"

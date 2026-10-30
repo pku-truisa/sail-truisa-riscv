@@ -129,21 +129,35 @@ point neither model can be checked on its own.
    Both mean "a swap keeps its position" is true only for same-position replacement,
    and that a same-file reordering is **not** a harmless defensive move.
 
-8. **Before copying a base file into a `truisa_` mirror, ask whether it has an
-   unresolved dependency.** The two answers lead to opposite actions:
+8. **Before taking a base file into the chain, ask two questions -- not one.** Both
+   can fail independently, and they lead to different repairs:
 
-   | The base file... | Do | Example |
+   | # | Question | If yes |
    |---|---|---|
-   | references something **undefined** in the tree | TruISA supplies it, base stays **out** of the chain | `riscv_sys_regs_access.sail` -- its xTVT block needs `legalize_tvt`/`register mtvt`, which do not exist |
-   | has **no** such reference | **use the base file as-is**, do not copy | `riscv_sys_exceptions.sail` -- defines `type ext_exception = unit` and stands on its own |
+   | ① | Does it **reference** a symbol that is undefined everywhere outside `model/cheri/`? | TruISA supplies it, or the chain is rearranged -- the base file stays **out** |
+   | ② | Does it **define** a name the chain **already defines**? | Take **only the missing names**; ⛔ never add the file whole |
 
-   One-line test: `grep` the candidate file for symbols with no definition anywhere
-   outside `model/cheri/`. Any hit means it cannot be used as-is.
+   | Failure seen | File | Repair |
+   |---|---|---|
+   | ① | `riscv_sys_regs_access.sail` -- its xTVT block needs `legalize_tvt` / `register mtvt`, neither of which exists | supplied by `truisa_sys_regs_access.sail`, base file dropped from the chain |
+   | ② | `riscv_types_ext.sail` -- 5 of its 10 names (`ext_exc_type` + four conversions) are already defined by TruISA's own enum | only the 3 missing stub types were taken |
+   | neither | `riscv_sys_exceptions.sail` | used as-is |
 
-   ⚠️ This rule exists because the opposite mistake was made three times in one
-   session: an empty `truisa_*` placeholder sat in the chain while the base file that
-   actually defines what the chain needs was left out. The symptom is always a
-   dangling name much later in the build, never next to the placeholder.
+   One-line tests: for ①, `grep` the candidate for symbols with no definition
+   anywhere outside `model/cheri/`; for ②, `grep` its top-level definition names
+   against the rest of the chain. Either hit means "not as-is".
+
+   ⚠️ Question ② was added after the ①-only version was applied and failed:
+   `riscv_types_ext.sail` had no unresolved reference at all, so ① said "use it
+   as-is", and the build then stopped on `Cannot define type synonym ext_exc_type
+   ... already exists`. The two failures look alike from far away -- both are
+   "this base file does not fit" -- which is exactly why both questions have to be
+   asked rather than inferred from one.
+
+   ⚠️ Question ① exists because the opposite mistake was made three times in one
+   session: an empty `truisa_*` placeholder sat in the chain while the base file
+   that actually defines what the chain needs was left out. The symptom is always
+   a dangling name much later in the build, never next to the placeholder.
 
 ### Identifier naming (TruISA addition)
 
