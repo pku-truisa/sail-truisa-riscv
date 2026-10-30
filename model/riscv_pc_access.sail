@@ -33,3 +33,25 @@ function tick_pc() = {
   PC = nextPC;
   pc_write_callback(PC);
 }
+
+/* Force the PC from C (D-168 / D-13).
+ *
+ * ⚠️ This function was deleted whole by D-144's CHERI strip, but only ONE of its five
+ * lines was CHERI. The baseline (80a9e65) body was:
+ *
+ *     let addr = truncate(pc, xlen);
+ *     PC = addr;                             <- NOT CHERI, belongs to every model
+ *     PCC = setCapAddrChecked(PCC, addr);     <- CHERI, and only this line
+ *
+ * Deleting all five lines removed a function the C emulator still calls
+ * (c_emulator/riscv_sim.cpp:443/459 -> zforce_pc, the `z`-prefixed C name of this
+ * function), so the emulator failed to compile on an undeclared identifier. This is the
+ * strip's boundary being measured wrong -- the opposite face of D-163's "the base file
+ * exists but is not usable".
+ *
+ * ⛔ Nothing CHERI comes back: no PCC, no capability, no check. Just PC. */
+val force_pc : bits(64) -> unit
+function force_pc(pc : bits(64)) -> unit = {
+  let addr = truncate(pc, xlen);
+  PC = addr;
+}
