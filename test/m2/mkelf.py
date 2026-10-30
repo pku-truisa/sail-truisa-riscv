@@ -329,8 +329,57 @@ def prog_u3():
     ] + _tail_store_sig()
 
 
+def prog_u4():
+    """U4: the `pac` invariant across CADD -- judgement 5 of m2-baseline.md section 4.
+
+    Skeleton and expectations come from D-176 section 4 (architecture group), not from
+    here. Two signature words, both 64-bit encodings of the same capability register,
+    taken before and after a CADD that only changes the address:
+
+        [0] written before CADD   -> bits 63..48 (tag + pac) and bits 47..0 (address)
+        [8] written after  CADD   -> the *same* bits 63..48, address + 8
+
+    Assertions (D-176 section 4):
+        a) bits 63..48 identical in both words  (first-measurement truth 0x98C8, kept)
+        b) bits 47..0  of the second = first + 8
+
+    Both are checked as absolute values by run.sh:
+        [0] = 0x98C8_0000_8000_0008   (same word U1 already pins)
+        [8] = 0x98C8_0000_8000_0010   (high half unchanged, low half + 8)
+
+    ADR-0005: the only places that sign a capability are SCBNDS and DIDW. CADD changes
+    the address and nothing else, so a changed `pac` here means CADD went through a
+    signing path -- a model defect, not a test bug.
+    """
+    return [
+        *li_addr(X1, TEXT_ADDR),
+        addi(X2, 0, 12),
+        scbnds(X1, X1, X2),          # c1 <- Aligned PTR, slot [0x8000_0000, 0x8000_0FFF]
+        *li_addr(X5, SCRATCH_ADDR),  # x5 = 0x8000_1000
+        sc(X1, X5, 0),               # before: c1 -> scratch
+        ld(X6, 0, X5),
+        *li_addr(X7, SIG_ADDR),      # x7 = 0x8000_2000
+        sd(X6, 0, X7),               # signature[0]  <- encoding before CADD
+        addi(X3, 0, 8),
+        cadd(X1, X1, X3),            # address += 8, tag/pac must not move
+        sc(X1, X5, 0),               # after: c1 -> scratch
+        ld(X6, 0, X5),
+        sd(X6, 8, X7),               # signature[8]  <- encoding after CADD
+    ] + _tail_exit()
+
+
+def _tail_exit():
+    """Write 1 to tohost and spin -- the exit tail, without touching the signature."""
+    return [
+        *li_addr(X1, TOHOST_ADDR),
+        addi(X2, 0, 1),
+        sd(X2, 0, X1),
+        jal(0, 0),
+    ]
+
+
 PROGRAMS = [("container", prog_container), ("u1", prog_u1),
-            ("u2", prog_u2), ("u3", prog_u3)]
+            ("u2", prog_u2), ("u3", prog_u3), ("u4", prog_u4)]
 
 
 def dump(name, words):

@@ -79,17 +79,52 @@ tr -d '\357\273\277' < "$EXPECT_FILE" | tr -d '\r' > "$EXPECT_CLEAN" \
 python3 "$SCRIPT_DIR/mkelf.py" "$OUT/lib" > "$OUT/mkelf.log" 2>&1 \
     || die "mkelf.py 失败，见 $OUT/mkelf.log"
 
-# 归一化：去掉 0x、去空白、转小写 —— 两边用同一把尺，避免"0x 有没有写"这种假失败
-norm() { printf '%s' "$1" | tr -d ' \t\r\n' | tr 'A-F' 'a-f' | sed 's/^0x//'; }
+# 归一化：去掉 0x、分隔符、空白，转小写 —— 两边用同一把尺，避免"0x 有没有写"这种假失败
+norm() { printf '%s' "$1" | tr -d ' \t\r\n' | tr -d '/' | tr 'A-F' 'a-f' | sed 's/0x//g'; }
 
-first_sig_word() {
-    # --test-signature 从 begin_signature 起、按 -g 8 每行 8 字节；第一行就是签名首字
+nfields() { printf '%s' "$1" | awk -F/ '{print NF}'; }
+
+get_sig() {
+    # 取签名区前 N 个 8 字节字，按 `0x…/0x…` 连起来（N＝expect 里 `/` 分隔的字段数）。
+    # ⭐ 为什么可以多字：有的用例的判据是"两个位点之间的关系"（U4 的 pac 不变式，
+    #    D-176 §四），单字签名称不住。⛔ 这不是新加列，只是同一个 signature 字段承载多个字。
+    # --test-signature 从 begin_signature 起、按 -g 8 每行 8 字节
     [ -s "$1" ] || { printf '%s' "-"; return; }
-    head -n 1 "$1" | tr -d ' \t\r' | tr 'A-F' 'a-f' | sed 's/^0x//'
+    head -n "$2" "$1" | tr -d ' \t\r' | tr 'A-F' 'a-f' | sed 's/^0x//' | awk '
+        { printf "%s0x%s", (NR > 1 ? "/" : ""), $0 }'
 }
 
 CSV_TMP="$OUT/.m2.csv.tmp"
 printf 'case,rc,trap,signature,expect,pass\n' > "$CSV_TMP" || die "写不了 $CSV_TMP"
+
+# ---------------------------------------------------------------- 期望值文件预检
+# ⛔ 不许"静默降级"：一条用例的判据是几个字，必须显式写在 words 列里，
+#    且与 expect 里的字段数一致。否则把 u4 的 expect 砍成一个字，判据会悄悄
+#    从"两个位点"退化成"一个字"，照样判 PASS（D-176 §六.2 立为通则的那类）。
+check_expect_file() {
+    n=0
+    while IFS=, read -r name expect words extra; do
+        case "$name" in
+            ''|'#'*) continue ;;
+            case) continue ;;          # 表头
+        esac
+        printf '%s' "$name" | grep -qE '^[A-Za-z0-9_.-]+$' \
+            || die "expect.csv 用例名不合法：$name"
+        [ -n "${words:-}" ] || die "expect.csv 缺 words 列：$name（格式：case,expect,words）"
+        [ -z "${extra:-}" ] || die "expect.csv 列多于三列：$name"
+        printf '%s' "${words}" | grep -qE '^[0-9]+$' || die "expect.csv 的 words 不是整数：$name,$words"
+        if [ "$expect" = "-" ]; then
+            [ "$words" = "1" ] || die "expect.csv：expect='-' 时 words 必须是 1：$name"
+        else
+            [ "$(nfields "$expect")" = "$words" ] \
+                || die "expect.csv 自相矛盾：$name 声明 words=$words，但 expect 有 $(nfields "$expect") 个字段（⛔ 不许静默降级）"
+        fi
+        n=$((n + 1))
+    done < "$EXPECT_CLEAN"
+    [ "$n" -gt 0 ] || die "expect.csv 里一条用例都没读到（$EXPECT_FILE）"
+}
+
+check_expect_file
 
 printf 'model@%s  sim=%s (%s B)  out=%s\n' "$MODEL_SHA" "$SIM" "$SIM_SIZE" "$OUT"
 [ "$MODEL_SHA" = "unknown" ] && \
@@ -101,14 +136,11 @@ TOTAL=0
 
 # ---------------------------------------------------------------- 逐例执行
 # expect.csv 的行序就是执行序；跳过 # 注释与表头
-while IFS=, read -r name expect; do
+while IFS=, read -r name expect words; do
     case "$name" in
         ''|'#'*) continue ;;
         case) continue ;;      # 表头
     esac
-    # ⛔ 静默跳过是危险的（一条用例会凭空消失）⇒ 形态不对就当场失败
-    printf '%s' "$name" | grep -qE '^[A-Za-z0-9_.-]+$' \
-        || die "expect.csv 格式不对（用例名只允许字母数字和 _ . -）：$name"
     TOTAL=$((TOTAL + 1))
 
     elf="$OUT/lib/$name.elf"
@@ -129,7 +161,11 @@ while IFS=, read -r name expect; do
 
     trap_n=$(grep -c 'trapping' "$log" 2>/dev/null || true)
     [ -n "$trap_n" ] || trap_n=0
-    got=$(first_sig_word "$sig")
+    # words 列＝这条用例的判据占几个字（预检已保证与 expect 字段数一致）。
+    # ⚠️ expect=`-`（不作签名判据）时**仍然读首字**：读了才看得出"签名区是空的/没写"，
+    #    才和上一轮记录同一形态；只是不拿它判 pass。
+    if [ "$expect" = "-" ]; then want=0; else want=$words; fi
+    got=$(get_sig "$sig" "$words")
 
     # 判据顺序照 §四：rc → HTIF 自退出 → trap → 签名（前者失败时后者无意义，但仍全列出来）
     reason=
@@ -141,8 +177,10 @@ while IFS=, read -r name expect; do
         reason="没打印 'HTIF located at 0x80003000'（§四 判据 2）"
     elif [ "$trap_n" -ne 0 ]; then
         reason="trap=$trap_n（§四 判据 3）"
+    elif [ "$expect" != "-" ] && [ "$(nfields "$got")" != "$want" ]; then
+        reason="签名位数不符（§四 判据 4）：期望 $want 个字，实测 $got"
     elif [ "$expect" != "-" ] && [ "$(norm "$got")" != "$(norm "$expect")" ]; then
-        reason="签名不符（§四 判据 4）：期望 $expect，实测 0x$got"
+        reason="签名不符（§四 判据 4）：期望 $expect，实测 $got"
     fi
 
     if [ -z "$reason" ]; then
@@ -152,12 +190,12 @@ while IFS=, read -r name expect; do
         FAILED=$((FAILED + 1))
     fi
 
-    printf '%s,%s,%s,%s,%s,%s\n' "$name" "$rc" "$trap_n" "0x$got" "$expect" "$pass" >> "$CSV_TMP"
+    printf '%s,%s,%s,%s,%s,%s\n' "$name" "$rc" "$trap_n" "$got" "$expect" "$pass" >> "$CSV_TMP"
     if [ "$pass" -eq 1 ]; then
-        printf '%-10s PASS  rc=0 trap=0 sig=0x%s\n' "$name" "$got"
+        printf '%-10s PASS  rc=0 trap=0 sig=%s\n' "$name" "$got"
     else
         printf '%-10s FAIL  %s\n' "$name" "$reason"
-        printf '           实测 sig=0x%s  expect=%s  log=%s\n' "$got" "$expect" "$log"
+        printf '           实测 sig=%s  expect=%s  log=%s\n' "$got" "$expect" "$log"
     fi
 done < "$EXPECT_CLEAN"
 

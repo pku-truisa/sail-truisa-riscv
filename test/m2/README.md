@@ -16,16 +16,37 @@ MODEL_SHA=$(git rev-parse --short HEAD) ./test/m2/run.sh
 ./test/m2/run.sh --csv docs/test/runs/<date>-<sha>.csv    # archive a record
 ```
 
-`run.sh` builds the four ELFs, runs each case without `--inst-limit` (L1 trap 6: a
-truncated run prints `rc=0` and hides a dead HTIF), compares the first signature word
-against `expect.csv`, and writes `case,rc,trap,signature,expect,pass` to
+`run.sh` builds the ELFs, runs each case without `--inst-limit` (L1 trap 6: a
+truncated run prints `rc=0` and hides a dead HTIF), compares the signature against
+`expect.csv`, and writes `case,rc,trap,signature,expect,pass` to
 `build/m2-run/m2.csv`. Exit codes: `0` all pass, `1` a case failed, `2` environment
 problem (mostly: no emulator built).
+
+## Cases
+
+| case | what it proves | source of the expectation |
+|---|---|---|
+| `container` | L1 only: ELF loads, HTIF prints its address, `tohost` write ends the run by itself | `m2-baseline.md` §4 judgements 2–3 (no signature criterion, `-`) |
+| `u1` | `CADD` +8 inside the slot; tag stays `0x4C`, `pac` unchanged | `m2-baseline.md` §3 |
+| `u2` | `SCADDR` to the slot top then `CADD` past it ⇒ poisoned `0111111`, silent, no trap | `m2-baseline.md` §3 |
+| `u3` | `CADD` on a Bare operand derives across the whole address space | `m2-baseline.md` §3 |
+| `u4` | the `pac` invariant across `CADD`: two encodings, same `bits 63..48`, `bits 47..0` +8 | `D-176` §4 (judgement 5) |
+
+⚠️ `u4` is the only case that needs **two** signature words (the criterion is a relation
+between two points, so one word cannot carry it). `expect.csv` expresses that with a `/`
+between fields and `run.sh` reads exactly that many 8-byte words from the signature area.
+The six CSV columns do not change.
+
+⚠️ `u4`'s first expectation was **wrong, and it was our mistake**: we pinned
+`0x…0008 / 0x…0010`, i.e. we mistook U1's post-`CADD` address for the pre-`CADD` snapshot.
+`D-176` §4 puts that snapshot after `scbnds` and before `cadd`, so the address is still the
+slot base. `expect.csv` records the old value, why it was wrong, and the trace lines that
+show it -- the criterion (`bits 63..48` equal, `bits 47..0` +8) never moved.
 
 Manual single-case invocation, if that is what you want:
 
 ```sh
-python3 mkelf.py .                     # writes container.elf u1.elf u2.elf u3.elf
+python3 mkelf.py .                     # writes container.elf u1.elf u2.elf u3.elf u4.elf
 ./build/c_emulator/sail_riscv_sim -T sig.txt -g 8 u1.elf
 ```
 
