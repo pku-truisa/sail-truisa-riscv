@@ -33,6 +33,11 @@
  *  announcements for one xRET. prepare_trap_vector in riscv_sys_exceptions.sail follows
  *  the same shape: it returns the vector, the caller sets the PC.
  *
+ *  ⚠️ The two line numbers above are a snapshot of THIS revision, not a fact about those
+ *  files -- a line number points into another tree and drifts silently. Re-derive with
+ *      grep -n "set_next_pc(exception_handler" model/riscv_insts_base.sail
+ *  before trusting them; the hit count is the evidence, not the number.
+ *
  *  ⚠️ The User arm: CHERI raises internal_error there. The ruling for this file is
  *  "Machine => mepc, otherwise => sepc", so User falls through to sepc. Unreachable today
  *  -- the only two call sites pass Machine (MRET) and Supervisor (SRET) -- but noted so
