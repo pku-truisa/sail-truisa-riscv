@@ -64,7 +64,11 @@ type truisa_cap_repr_width : Int = truisa_ptr_width + truisa_meta_width
 let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
 
 // Salt width: 32 bits at XLEN 64 (spec/ch04 line 183), 16 at XLEN 32.
-// ⚠️ The 16 is NOT in spec/ch04 -- it says 32. Cross-XLEN choice, reported for a ruling.
+// ⭐ DERIVED, not enumerated (D-223 ruling 1): a descriptor half-word is `xlen` wide, its
+// valid field is truisa_address_width bits, so the remaining bits of the two half-words are
+// exactly 2 * (xlen - address_width). 64 -> 32, 32 -> 16. The salt is the RESIDUE of the
+// entry layout, not an input to it -- do not write it as `if xlen == 32 then 16 else 32`.
+// ⚠️ The XLEN 32 value is a model capability, not a spec commitment (ADR-0032 decision 3).
 // It is an Int (not a `type = if ... then bits(..)`) because truisa_mac_msg_width has to
 // consume the number, and a conditional type cannot be asked for its width.
 //
@@ -77,7 +81,7 @@ let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
 // ⚠️ Sail will not complain about either: bits(50) is a perfectly well-formed type, and
 // nothing in the model knows what the carrier can hold. The failure is silent and shows up
 // as a spec/model divergence, not as a build error.
-type truisa_salt_width : Int = if xlen == 32 then 16 else 32
+type truisa_salt_width : Int = 2 * (xlen - truisa_address_width)
 let  truisa_salt_width = sizeof(truisa_salt_width)
 
 type truisa_tag_width : Int = truisa_mode_width + truisa_nc_width
@@ -261,17 +265,26 @@ let truisa_xpkey_stub : bits(128) =
 // 1b-2. foldXor -- the stub's mixing primitive. spec/ch04 line 314 pins the OUTPUT rule: the
 // MAC yields >= PAC_W bits and the PAC slice takes the low ones.
 // why: doc/truisa-deltas.md#foldxor
+// Fold `x` by XOR-ing it with itself shifted down by w, k times. Taking the low w bits of
+// the result is exactly "split into w-bit blocks, XOR them, zero-extend the last block":
+// a block shorter than w ends up with zeros above it, which is what zero-extension means.
+val  foldXorShifted : (bits(128), int, int, bits(128)) -> bits(128)
+function foldXorShifted(x : bits(128), w : int, i : int, acc : bits(128)) -> bits(128) =
+  if i * w >= 128 then acc
+  else foldXorShifted(x, w, i + 1, acc ^ sail_shiftright(x, i * w))
+
+// ⚠️ foldXor is a STUB, as is truisa_xpkey_stub. ⛔ Never quote its output as an
+// intensity figure for the XLEN 32 instance: folding 128 bits down to w = 2 leaves a
+// quarter-ish success rate for ANY stub. That is a DESIGN GAP, not an implementation
+// defect -- a real implementation must be a cryptographic hash meeting the strength floor
+// of ADR-0005 decision 10.
 val  foldXor : (bits(128), int) -> bits(truisa_pac_width)
 function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
+  // ⛔ Not `w == 2 | w == 9`: that would re-enumerate PAC_W. PAC_W is 2 or 9 today and the
+  // only value that must never occur is 0 (a zero-width fold is not a function).
+  assert(w > 0);
   assert(w == truisa_pac_width);
-  // The slice list below assumes PAC_W == 9 over 128 bits. Sv39 (17) and Sv57 (0) need a
-  // different list, so fail loudly here rather than fold the wrong bits silently.
-  assert(truisa_pac_width == 9);
-  x[8 .. 0]       ^ x[17 .. 9]     ^ x[26 .. 18]   ^ x[35 .. 27]
-  ^ x[44 .. 36]   ^ x[53 .. 45]    ^ x[62 .. 54]   ^ x[71 .. 63]
-  ^ x[80 .. 72]   ^ x[89 .. 81]    ^ x[98 .. 90]   ^ x[107 .. 99]
-  ^ x[116 .. 108] ^ x[125 .. 117]
-  ^ (0b0000000 @ x[127 .. 126])
+  truncate(foldXorShifted(x, w, 0, zeros()), truisa_pac_width)
 }
 
 // 1b-3. truisaMac -- the interface the architecture fixes. spec/ch04 line 313: the input is
@@ -326,6 +339,10 @@ function verifyPtr(cap : Capability, salt : cap_salt) -> bool =
 //   descriptor  -> the entry's salt; NOT written yet -- phase A produces no such form.
 // Do not change cap_salt's type or width here (D-220 section 4.3).
 // why: doc/truisa-deltas.md#keysalt
+// ⚠️ `cap` is unused in phase A BY DESIGN, not by oversight (D-223 ruling 5): the salt is
+// a constant here, so there is nothing to look up. Phase B computes the entry identifier
+// FROM this argument; do not change the signature to (form, nc) -- that would push form
+// knowledge back to the call sites, which is the thing keySalt exists to prevent.
 val  keySalt : Capability -> cap_salt
 function keySalt(cap : Capability) -> cap_salt = zeros()
 
