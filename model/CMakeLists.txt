@@ -237,6 +237,7 @@ set(sail_common
         "truisa/truisa_mem_metadata.sail"
         "prelude_mem.sail"
         "arithmetic.sail"
+        "truisa/truisa_pac.sail"
         "truisa/truisa_cap_common.sail"
         "rvfi_dii.sail"
         "rvfi_dii_v1.sail"

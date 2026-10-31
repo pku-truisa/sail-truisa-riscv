@@ -197,48 +197,24 @@ function poisonIf(cap : Capability, cond : bool) -> Capability =
   if cond then { truisa_poison_cap with address = cap.address } else cap
 
 
-// 1b-1. The key stub. spec/ch04 line 312: xpkey is 128 bits (xpkey1 || xpkey0), and
-// xpkey == 0 is a defined-but-empty key.
-// Warning: Placeholder for the xpkey CSR, which does not exist yet -- delete this when it lands.
-// why: doc/truisa-deltas.md#xpkey
-let truisa_xpkey_stub : bits(128) =
-  0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF
+// ---- PAC algorithm boundary ------------------------------------------------------------
+// The algorithm itself (key, fold, MAC) lives in truisa_pac.sail. Swap THAT file to change
+// the MAC; nothing below it here changes. What stays here is the part that knows how wide
+// PAC_W is, because that is protocol, not algorithm.
+// ----------------------------------------------------------------------------------------
 
-// 1b-2. foldXor -- the stub's mixing primitive. spec/ch04 line 314 pins the OUTPUT rule: the
-// MAC yields >= PAC_W bits and the PAC slice takes the low ones.
-// why: doc/truisa-deltas.md#foldxor
-// XOR `x` with itself shifted by w, 2w, ... and keep the low w bits: exactly "split into
-// w-bit blocks, XOR, zero-extend the last block".
-// Warning: `sail_shiftright` is a lib-internal symbol, used deliberately -- `slice` cannot
-// express a variable-width chunk. why: doc/truisa-deltas.md#foldxor
-val  foldXorShifted : (bits(128), int, int, bits(128)) -> bits(128)
-function foldXorShifted(x : bits(128), w : int, i : int, acc : bits(128)) -> bits(128) =
-  if i * w >= 128 then acc
-  else foldXorShifted(x, w, i + 1, acc ^ sail_shiftright(x, i * w))
-
-// Warning: STUB (as is truisa_xpkey_stub). Never quote its output as a strength figure --
-// w = 2 leaves ~1/4 for ANY stub. Real implementations meet ADR-0005 decision 10.
-val  foldXor : (bits(128), int) -> bits(truisa_pac_width)
-function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
-  // Notes: not `w == 2 | w == 9` (that re-enumerates PAC_W). w = 0 cannot arise from any
-  // legal configuration; this rejects an undefined domain, not the old Sv57 tier.
-  assert(w > 0);
-  assert(w == truisa_pac_width);
-  truncate(foldXorShifted(x, w, 0, zeros()), truisa_pac_width)
-}
-
-// 1b-3. truisaMac -- the interface the architecture fixes. spec/ch04 line 313: the input is
-// hi7 || m || salt, a FIXED-length concatenation, so no two distinct inputs share a shape.
+// 1b-3. truisaMac -- the width-aware wrapper the architecture fixes. spec/ch04 line 313: the
+// input is tag || CentroID || salt, a FIXED-length concatenation, so no two distinct inputs
+// share a shape. Spelled as a sum, never as 87 -- that number is only right at XLEN 64.
+// The result is truncated to PAC_W here, which is the only place the algorithm's 128-bit
+// output meets the profile's width.
 // why: doc/truisa-deltas.md#mac
-// MAC input = tag || CentroID || salt, FIXED length (spec/ch04). Spelled as a sum, never
-// as 87 -- that number is only right at XLEN 64.
 type truisa_mac_msg_width : Int =
   truisa_mode_width + truisa_nc_width + truisa_address_width + truisa_salt_width
 
 val  truisaMac : (bits(128), bits(truisa_mac_msg_width)) -> bits(truisa_pac_width)
 function truisaMac(key : bits(128), msg : bits(truisa_mac_msg_width)) -> bits(truisa_pac_width) =
-  foldXor(key, truisa_pac_width)
-  ^ foldXor(zero_extend(msg), truisa_pac_width)
+  truncate(truisa_mac_raw(key, zero_extend(msg), truisa_pac_width), truisa_pac_width)
 
 
 val  getCapPac : Capability -> CapPacBits
