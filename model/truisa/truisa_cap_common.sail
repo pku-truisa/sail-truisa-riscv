@@ -65,7 +65,7 @@ let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
 // Alias layer: `Cap*` keeps the blueprint's spelling so the two files read side by side.
 // Each is defined from a `truisa_*` width above; none carries a constant of its own.
 
-// Capability size in bytes. ⛔ Not `2 ^ log2_cap_size` -- that cannot be folded (D-94).
+// Capability size in bytes. Notes: do not use `2 ^ log2_cap_size`, which cannot be folded (D-94).
 type cap_size : Int = if xlen == 32 then 4 else 8
 let  cap_size = sizeof(cap_size)
 
@@ -78,7 +78,7 @@ type CapMetaBits = bits(truisa_meta_width)
 // VA + PAC_W - 1 .. VA -- never literal bit numbers, the slice moves with the profile.
 type CapPacBits  = bits(truisa_pac_width)
 
-// Entry salt, or all zeros on the aligned path (ADR-0005 rev 11 c3). ⚠️ The zero segment
+// Entry salt, or all zeros on the aligned path (ADR-0005 rev 11 c3). Warning: The zero segment
 // is NOT omitted -- it is what fixes the MAC input length.
 type CapSaltBits = bits(truisa_salt_width)
 
@@ -105,14 +105,14 @@ let truisa_poison_cap : Capability = struct {
 }
 
 // 1a-2 / 1a-3. Disassemble and assemble the memory encoding.
-// ⛔ There is no `capToBits` any more (ADR-0029 decision 3): with `address` at 64 bits the
-// blueprint's own shape applies too (cheri_insts.sail:211). ⛔ Do not rescue it.
+// Notes: There is no `capToBits` any more (ADR-0029 decision 3): with `address` at 64 bits the
+// blueprint's own shape applies too (cheri_insts.sail:211). Notes: Do not rescue it.
 val  capToMetadataBits : Capability -> CapMetaBits
 function capToMetadataBits(cap : Capability) -> CapMetaBits =
   cap.mode @ cap.nc @ cap.pac
 
 // encode . decode = id, ONLY on canonical capabilities (ADR-0029 invariant I1): a bare
-// integer written by wX is not canonical and does not round-trip. ⛔ Never rename this to
+// integer written by wX is not canonical and does not round-trip. Notes: Never rename this to
 // `_tag` -- TruISA has no tag bit (ADR-0003 decision 4).
 val  bitsToCap : (bool, CapBits) -> Capability
 function bitsToCap(tag : bool, ptr : CapBits) -> Capability =
@@ -157,7 +157,7 @@ function getCapForm(cap : Capability) -> CapPtrForm = {
 }
 
 // 1a-6. Slot base: S = p with the low N bits cleared, i.e. (p >> N) << N.
-// ⚠️ Written as a shift PAIR, not `p & ~(2^N - 1)`: the mask form needs a negative-shaped
+// Warning: Written as a shift PAIR, not `p & ~(2^N - 1)`: the mask form needs a negative-shaped
 // literal in this width, which Sail will not take.
 // why: doc/truisa-deltas.md#slotbase
 val  getCapSlotBase : (CapAddrBits, bits(truisa_nc_width)) -> CapAddrBits
@@ -173,7 +173,7 @@ function getCapSlotBase(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBi
 // why: doc/truisa-deltas.md#centroid
 val  getCapCentroID : (CapAddrBits, bits(truisa_nc_width)) -> CapAddrBits
 function getCapCentroID(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBits = {
-  // ⚠️ k must be nat, not int. Written as int (unsigned(n) coerced) Sail cannot prove
+  // Warning: k must be nat, not int. Written as int (unsigned(n) coerced) Sail cannot prove
   // `k >= 0` and rejects the shift with "Could not resolve quantifiers for shiftl".
   // getCapSlotBase gets away with it only because it inlines unsigned(n) at the shift,
   // where the non-negativity is still visible.
@@ -183,7 +183,7 @@ function getCapCentroID(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBi
   else if k == truisa_address_width then zeros()
   else {
     let twop : bits(64) = 0x0000_0000_0000_0001 << k;
-    // ⚠️ truncate takes TWO arguments in Sail: the value and the target width
+    // Warning: truncate takes TWO arguments in Sail: the value and the target width
     // (bitvector('n), int('m)). One-argument form fails to resolve.
     let half : CapAddrBits = truncate(twop >> 1, truisa_address_width);
     base + half
@@ -203,7 +203,7 @@ function poisonIf(cap : Capability, cond : bool) -> Capability =
 
 // 1b-1. The key stub. spec/ch04 line 312: xpkey is 128 bits (xpkey1 || xpkey0), and
 // xpkey == 0 is a defined-but-empty key.
-// ⚠️ Placeholder for the xpkey CSR, which does not exist yet -- delete this when it lands.
+// Warning: Placeholder for the xpkey CSR, which does not exist yet -- delete this when it lands.
 // why: doc/truisa-deltas.md#xpkey
 let truisa_xpkey_stub : bits(128) =
   0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF
@@ -215,26 +215,26 @@ let truisa_xpkey_stub : bits(128) =
 // the result is exactly "split into w-bit blocks, XOR them, zero-extend the last block":
 // a block shorter than w ends up with zeros above it, which is what zero-extension means.
 //
-// ⚠️ `sail_shiftright` is an INTERNAL symbol of the Sail library (vector.sail:380, the
+// Warning: `sail_shiftright` is an INTERNAL symbol of the Sail library (vector.sail:380, the
 // `sail_` prefix marks it). It is used deliberately, not by mistake: the obvious
 // alternative `x >> (i * w)` needs the shift amount to be evaluable, and `slice` cannot
 // help at all because its result length is a TYPE parameter (`'n` in
 // `(bits('m), int('o), int('n)) -> bits('n)`), so it cannot express a variable-width
-// chunk. ⛔ Do not "tidy" this into `x >> (i*w)` without re-running both configurations --
+// chunk. Notes: Do not "tidy" this into `x >> (i*w)` without re-running both configurations --
 // whether that form is accepted has never been checked.
 val  foldXorShifted : (bits(128), int, int, bits(128)) -> bits(128)
 function foldXorShifted(x : bits(128), w : int, i : int, acc : bits(128)) -> bits(128) =
   if i * w >= 128 then acc
   else foldXorShifted(x, w, i + 1, acc ^ sail_shiftright(x, i * w))
 
-// ⚠️ foldXor is a STUB, as is truisa_xpkey_stub. ⛔ Never quote its output as an
+// Warning: foldXor is a STUB, as is truisa_xpkey_stub. Notes: Never quote its output as an
 // intensity figure for the XLEN 32 instance: folding 128 bits down to w = 2 leaves a
 // quarter-ish success rate for ANY stub. That is a DESIGN GAP, not an implementation
 // defect -- a real implementation must be a cryptographic hash meeting the strength floor
 // of ADR-0005 decision 10.
 val  foldXor : (bits(128), int) -> bits(truisa_pac_width)
 function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
-  // ⛔ Not `w == 2 | w == 9`: that would re-enumerate PAC_W. The assertion exists to
+  // Notes: do not write `w == 2 | w == 9`, which would re-enumerate PAC_W. The assertion exists to
   // REJECT AN UNDEFINED DOMAIN, not to defend against the withdrawn Sv57 profile -- that
   // profile no longer exists in this architecture, so w = 0 cannot arise from any legal
   // configuration. It guards against a future mis-configuration, and a zero-width fold is
@@ -266,7 +266,7 @@ function getCapPac(cap : Capability) -> CapPacBits =
 
 
 // 1b-5. signPtr -- the single signing operator (spec/ch04 line 233-242), called ONLY at PTR
-// production points. The m = 0 cases are resolved by D-108 ruling 甲: for a one-byte slot at
+// production points. The m = 0 cases are resolved by D-108 ruling A: for a one-byte slot at
 // address 0 it is reachable and legal, while N = VA returning 0 is an ADR-0026 ruling.
 // why: doc/truisa-deltas.md#signptr
 val  signPtr : (Capability, CapSaltBits) -> Capability
@@ -296,7 +296,7 @@ function verifyPtr(cap : Capability, salt : CapSaltBits) -> bool =
 //   descriptor  -> the entry's salt; NOT written yet -- phase A produces no such form.
 // Do not change CapSaltBits's type or width here (D-220 section 4.3).
 // why: doc/truisa-deltas.md#keysalt
-// ⚠️ `cap` is unused in phase A BY DESIGN, not by oversight (D-223 ruling 5): the salt is
+// Warning: `cap` is unused in phase A BY DESIGN, not by oversight (D-223 ruling 5): the salt is
 // a constant here, so there is nothing to look up. Phase B computes the entry identifier
 // FROM this argument; do not change the signature to (form, nc) -- that would push form
 // knowledge back to the call sites, which is the thing keySalt exists to prevent.
@@ -304,7 +304,7 @@ val  keySalt : Capability -> CapSaltBits
 function keySalt(cap : Capability) -> CapSaltBits = zeros()
 
 // 1b-7. makeCapAligned -- build an aligned-slot pointer and sign it.
-// ⚠️ The body MUST be `if fail then poison else sign`: Sail evaluates arguments before the
+// Warning: The body MUST be `if fail then poison else sign`: Sail evaluates arguments before the
 // call, so `poisonIf(signPtr(q, ...), fail)` would compute a MAC and throw it away (D-99 V-5).
 val  makeCapAligned : (Capability, bits(truisa_nc_width), bool) -> Capability
 function makeCapAligned(parent : Capability, n : bits(truisa_nc_width), fail : bool)
@@ -362,7 +362,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 
 // 1c-1. The bounds projection used by GCBASE / GCBOUND. spec/insns/gcbase.adoc states the
 // three forms as ONE formula, SlotBase(addr, K); the body does NOT fold bare into it,
-// deliberately. ⛔ None() has three sources and they are NOT the same thing (gcbase.adoc).
+// deliberately. Notes: None() has three sources and they are NOT the same thing (gcbase.adoc).
 // why: doc/truisa-deltas.md#gcbase
 val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
 function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)) = {
@@ -389,7 +389,7 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
 // why: doc/truisa-deltas.md#predicates
 
 /* (1) representable: the result stays in the source pointer's slot; for bare, which has
- * no slot, it degrades to the same bit (VA-1) HALF. ⛔ NOT `true` for bare: letting CADD
+ * no slot, it degrades to the same bit (VA-1) HALF. Notes: NOT `true` for bare: letting CADD
  * cross the half while SCADDR refuses to would make relative moves and absolute writes
  * disagree about legality (ADR-0029 decision 11.4). Cost: a bare pointer cannot cross
  * 2^(VA-1). */
@@ -407,8 +407,8 @@ val  ptrIntact : (Capability, CapPtrForm) -> bool
 function ptrIntact(cap : Capability, form : CapPtrForm) -> bool =
   if form == FormBare then true else verifyPtr(cap, keySalt(cap))
 
-// (3) a carry out of the address field, judged ON THE FIELD. ⛔ Never as
-// `sign_extend(new48) == sum`: that form is identically false whenever bit(VA-1) is set, so it
+// (3) a carry out of the address field, judged ON THE FIELD. Notes: never judge it as
+// `sign_extend(new48) == sum`, which is identically false whenever bit(VA-1) is set, so it
 // would poison the whole upper half. why: doc/truisa-deltas.md#carry
 val  carryOutOfAddrField : (CapAddrBits, xlenbits) -> bool
 function carryOutOfAddrField(a : CapAddrBits, delta : xlenbits) -> bool = {
@@ -423,7 +423,7 @@ function carryOutOfAddrField(a : CapAddrBits, delta : xlenbits) -> bool = {
 // MAC covers the slot, not the address (ADR-0004). (3) is a FIELD test -- never
 // `sign_extend(new) == sum`, which is identically false for the whole upper half. Downward
 // overflow is ALLOWED (mod 2^VA). why: doc/truisa-deltas.md#incaddr
-/* ⚠️ Declared ahead of its use, and that is deliberate: incCapAddrChecked delegates to
+/* Warning: Declared ahead of its use, and that is deliberate: incCapAddrChecked delegates to
  * it, and source order is load-bearing WITHIN a file as well as across files
  * (CODE_STYLE rule 7). The definition stays in 1c-3 below -- this `val` is the whole
  * point, so do not "tidy" it away by moving the definition up. */
@@ -434,7 +434,7 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
   let form = getCapForm(cap);
   let a : CapAddrBits = cap.address[truisa_address_width - 1 .. 0];
   let sum : bits(truisa_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-  // ⚠️ THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without it
+  // Warning: THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without it
   // an illegal input that happens to overflow would be poisoned by the outer call even
   // though criteria (1)/(2) never ran -- FormInvalid laundered into FormPoisoned.
   let carries : bool =
