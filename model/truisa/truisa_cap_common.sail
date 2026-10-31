@@ -315,7 +315,9 @@ function keySalt(cap : Capability) -> CapSaltBits = zeros()
 val  makeCapAligned : (Capability, bits(truisa_nc_width), bool) -> Capability
 function makeCapAligned(parent : Capability, n : bits(truisa_nc_width), fail : bool)
     -> Capability =
-  if fail then truisa_poison_cap
+  // Notes: `parent.address`, not the slot base and not 0 (D-224) -- the slot base is a
+  // derived position that can fall outside `parent` as n grows, and 0 carries no information.
+  if fail then { truisa_poison_cap with address = parent.address }
   else {
     let q : Capability = struct {
       mode    = 0b1,
@@ -447,7 +449,12 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
     (form != FormPoisoned) & (form != FormInvalid) & carryOutOfAddrField(a, delta);
   /* Poisoned / invalid inputs come back untouched from setCapAddrChecked's own form
    * dispatch, and `carries` is false for them, so they are returned exactly as given. */
-  poisonIf(setCapAddrChecked(cap, truncate(sum, truisa_address_width)), carries)
+  /* Notes: the OUTER poison must pass `cap` too, not the inner result -- the inner call
+   * already returns `addr = new48` on success, so poisoning that value would put the
+   * carried-into-nowhere address into the repair entry point (D-224). Fixing only the
+   * inner one changes nothing here. */
+  poisonIf(if carries then cap else setCapAddrChecked(cap, truncate(sum, truisa_address_width)),
+           carries)
 }
 
 // 1c-3. The checked address setter used by SCADDR.
@@ -471,7 +478,11 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
       address = sign_extend(addr),
     };
     /* Criteria (1) then (2), in the spec's order, so a future xtval can say which failed
-     * first. One call each -- the definitions are in 1c-2a, not here. */
-    poisonIf(newCap, not(sameSlot(a, cap.nc, form, addr)) | not(ptrIntact(cap, form)))
+     * first. One call each -- the definitions are in 1c-2a, not here.
+     * Notes: the poisoned result carries the CALLER's address, not `addr` (D-224). The
+     * poison address is a REPAIR ENTRY POINT: software re-binds from it (SCBNDS/DIDW), so
+     * handing back the address that failed to be written would rebuild the pointer in
+     * somebody else's object -- fail-then-repair must not become a privilege escalation. */
+    poisonIf(cap, not(sameSlot(a, cap.nc, form, addr)) | not(ptrIntact(cap, form)))
   }
 }
