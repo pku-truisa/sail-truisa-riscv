@@ -618,9 +618,12 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
  *
  * (1) representable -- the result stays inside the source pointer's slot. Bare pointers
  *     have no slot and constrain nothing (ADR-0019), so they short-circuit to true.
- * (2) intact -- phase A has no salt outside the table, so verifyPtr runs with zeros() and
- *     is trivially true on the aligned path. Known weakening, ADR-0029 decision 10.4; it
- *     becomes a real check only when the descriptor table arrives.
+ * (2) intact -- on the ALIGNED path the salt is all-zero BY SPEC, not by placeholder:
+ *     an aligned slot has no table entry, hence no salt and no re-keying moment, so the
+ *     spec fixes that segment at zero and keeps it fixed in phase B too (spec/ch04:251,
+ *     :256, ADR-0005 revision 11 item 3). So this is a real verify against the real
+ *     (all-zero) salt, not a weakening. What is genuinely unimplemented is the DESCRIPTOR
+ *     path: no operator produces that form in phase A (ADR-0029 decision 10.4).
  * (3) no carry -- computed on the FIELD, not on the 64-bit sum.
  *
  * ⭐ Why copying `pac` through is correct, and not a missing re-sign: the MAC input is
@@ -678,19 +681,34 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
       else getCapSlotBase(a, cap.nc) == getCapSlotBase(new48, cap.nc);
 
     /* Criterion (2) -- intact. ⚠️⚠️ SKIPPED for bare, and that is load-bearing, not a
-     * convenience: in phase A `verifyPtr(cap, zeros())` does not mean "integrity
-     * verified", it means "cs1 is not bare". Aligned pointers are signed by
-     * makeCapAligned with zeros() (so the check is trivially true), and bare pointers are
+     * convenience: on an aligned pointer `verifyPtr(cap, zeros())` compares against the
+     * all-zero salt, which is exactly the salt that form is defined to carry (spec/ch04),
+     * so the check is genuinely performed and genuinely passes; its only discriminating
+     * power in phase A is therefore "cs1 is not bare". Aligned pointers are signed by
+     * makeCapAligned with zeros() for the same spec reason, and bare pointers are
      * NEVER signed (ADR-0005 decision 3) -- so on bare it is trivially FALSE. Without the
      * skip, every bare-pointer `p += 4` in S/M mode would poison, which is the whole of
      * ADR-0011's permissive tier (ADR-0029 decision 11.2).
      *
-     * ⚠️ `zeros()` is a PHASE-A PLACEHOLDER, not a salt (ADR-0029 decision 11.3). When the
-     * descriptor table arrives, the salt must come from the entry / DLB. The failure mode
-     * if that call site is not updated is silent and total: verifyPtr would compare against
-     * a MAC computed with zeros() while the table signed with the real salt, so EVERY
-     * pointer fails and nothing goes red. Do not trust criterion (2) as an integrity
-     * guarantee before then. */
+     * ⚠️⚠️ TWO CASES SHARE THIS `else` AND THEY MUST BE TOLD APART. Treating the whole
+     * branch as "a phase-A placeholder" is wrong and has already misled one review round
+     * (D-198 correction):
+     *
+     *   - FormAligned  -- `zeros()` is the CORRECT FINAL VALUE. The aligned slot has no
+     *     table entry, therefore no salt and no re-keying moment; the spec fixes the salt
+     *     segment at all-zero and keeps it there (spec/ch04:251, :256; ADR-0005 revision
+     *     11 item 3). It does NOT change in phase B.
+     *   - FormDescriptor -- `zeros()` IS a placeholder. No operator produces that form in
+     *     phase A (CapPtrForm in truisa_types.sail), so this half is unreachable today;
+     *     when the descriptor table lands the salt must come from the entry / DLB.
+     *
+     * ⛔ CONSEQUENCE FOR PHASE B: this single `else` cannot survive as it is. Rewiring the
+     * salt here would also change the aligned path, which the spec forbids. Split the
+     * branch by form FIRST, then wire the descriptor side -- and only then can "descriptor
+     * salt is wired" be grep-checked (descriptor side: no zeros() left; aligned side: its
+     * zeros() must remain). The old warning said a missed update would make every pointer
+     * fail silently; the sharper risk today is the opposite: a global replace would break
+     * the aligned path, which looks like progress. */
     let intact : bool =
       if form == FormBare then true else verifyPtr(cap, zeros());
 
@@ -743,7 +761,9 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
       else getCapSlotBase(a, cap.nc) == getCapSlotBase(addr, cap.nc);
     /* (2) intact: skipped for bare for the same reason as in 1c-2 (bare is never signed,
      * so the check would be trivially false and SCADDR would poison every bare address
-     * write). zeros() is the PHASE-A PLACEHOLDER, not a salt -- see the warning above. */
+     * write). `zeros()` here is the SPEC salt for the aligned form and a placeholder for
+     * the descriptor form -- read the long warning at 1c-2 before touching it, in
+     * particular the "split the branch first" requirement. */
     let intact : bool =
       if form == FormBare then true else verifyPtr(cap, zeros());
     let newCap : Capability = struct {
