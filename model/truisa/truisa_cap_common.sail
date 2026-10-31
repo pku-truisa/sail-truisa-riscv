@@ -106,7 +106,6 @@ let truisa_poison_cap : Capability = struct {
   address = zeros(),
 }
 
-// 1a-2 / 1a-3. Disassemble and assemble the memory encoding.
 // Notes: There is no `capToBits` any more (ADR-0029 decision 3): with `address` at 64 bits the
 // blueprint's own shape applies too (cheri_insts.sail:211). Notes: Do not rescue it.
 val  capToMetadataBits : Capability -> CapMetaBits
@@ -140,11 +139,8 @@ function getCapTagBits(cap : Capability) -> CapTagBits =
   capToMetadataBits(cap)[truisa_meta_width - 1 .. truisa_pac_width]
 
 // 1a-5. Which of the five forms the label denotes (docs/isa/03 section 3.3). The order is
-// not negotiable: 0000000/1111111 -> Bare FIRST (a descriptor with C = 0 encodes as
-// 0000000, so testing bit 63 first would report a bare pointer as a descriptor), then
-// 0111111 -> the only poison code, then bit 63: 1 = Aligned / 0 = Descriptor.
-// N/C in VA+1..62 -> Invalid. Form is NECESSARY, not sufficient, for Bare: bits 63..VA
-// must also match bit(VA-1). why: doc/truisa-deltas.md#forms
+// Order is not negotiable: both Bare codes first (a descriptor with C = 0 encodes as
+// 0000000), then the poison code, then bit 63. why: doc/truisa-deltas.md#forms
 val  getCapForm : Capability -> CapPtrForm
 function getCapForm(cap : Capability) -> CapPtrForm = {
   let tag = getCapTagBits(cap);
@@ -192,20 +188,14 @@ function getCapCentroID(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBi
   }
 }
 
-// 1a-8. poisonIf -- the single failure exit of every PTR-producing instruction.
-// The ADDRESS IS PRESERVED. `bits 47-0 = addr(x)` is a REQUIREMENT at Sv48, not advice
-// (ADR-0003 revision 25 / D-126), and isa/07 writes this operator as
-// `poisonCode(getCapAddr(cap))`. Two things break without it: GCADDR can no longer return
-// the real address of a poisoned pointer, and `poison` stops being idempotent.
-// Sail is NOT lazy: `poisonIf(sign(cap), fail)` evaluates sign() even when fail holds,
-// which is why makeCapAligned uses `if fail then poison else sign` (D-99 V-5).
+// 1a-8. poisonIf -- the single failure exit of every PTR-producing instruction, and the
+// ADDRESS IS PRESERVED (ADR-0003 r25): it is the repair entry point, so it must not hold
+// the address that failed to be written. Sail is NOT lazy (D-99 V-5).
 // why: doc/truisa-deltas.md#poisonif
 val  poisonIf : (Capability, bool) -> Capability
 function poisonIf(cap : Capability, cond : bool) -> Capability =
   if cond then { truisa_poison_cap with address = cap.address } else cap
 
-// 1b. The authentication segment: stub key, folding XOR, sign/verify, and the two producers
-// that need a signature (makeCapAligned, setCapBounds).
 
 // 1b-1. The key stub. spec/ch04 line 312: xpkey is 128 bits (xpkey1 || xpkey0), and
 // xpkey == 0 is a defined-but-empty key.
@@ -217,34 +207,21 @@ let truisa_xpkey_stub : bits(128) =
 // 1b-2. foldXor -- the stub's mixing primitive. spec/ch04 line 314 pins the OUTPUT rule: the
 // MAC yields >= PAC_W bits and the PAC slice takes the low ones.
 // why: doc/truisa-deltas.md#foldxor
-// Fold `x` by XOR-ing it with itself shifted down by w, k times. Taking the low w bits of
-// the result is exactly "split into w-bit blocks, XOR them, zero-extend the last block":
-// a block shorter than w ends up with zeros above it, which is what zero-extension means.
-//
-// Warning: `sail_shiftright` is an INTERNAL symbol of the Sail library (vector.sail:380, the
-// `sail_` prefix marks it). It is used deliberately, not by mistake: the obvious
-// alternative `x >> (i * w)` needs the shift amount to be evaluable, and `slice` cannot
-// help at all because its result length is a TYPE parameter (`'n` in
-// `(bits('m), int('o), int('n)) -> bits('n)`), so it cannot express a variable-width
-// chunk. Notes: Do not "tidy" this into `x >> (i*w)` without re-running both configurations --
-// whether that form is accepted has never been checked.
+// XOR `x` with itself shifted by w, 2w, ... and keep the low w bits: exactly "split into
+// w-bit blocks, XOR, zero-extend the last block".
+// Warning: `sail_shiftright` is a lib-internal symbol, used deliberately -- `slice` cannot
+// express a variable-width chunk. why: doc/truisa-deltas.md#foldxor
 val  foldXorShifted : (bits(128), int, int, bits(128)) -> bits(128)
 function foldXorShifted(x : bits(128), w : int, i : int, acc : bits(128)) -> bits(128) =
   if i * w >= 128 then acc
   else foldXorShifted(x, w, i + 1, acc ^ sail_shiftright(x, i * w))
 
-// Warning: foldXor is a STUB, as is truisa_xpkey_stub. Notes: Never quote its output as an
-// intensity figure for the XLEN 32 instance: folding 128 bits down to w = 2 leaves a
-// quarter-ish success rate for ANY stub. That is a DESIGN GAP, not an implementation
-// defect -- a real implementation must be a cryptographic hash meeting the strength floor
-// of ADR-0005 decision 10.
+// Warning: STUB (as is truisa_xpkey_stub). Never quote its output as a strength figure --
+// w = 2 leaves ~1/4 for ANY stub. Real implementations meet ADR-0005 decision 10.
 val  foldXor : (bits(128), int) -> bits(truisa_pac_width)
 function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
-  // Notes: do not write `w == 2 | w == 9`, which would re-enumerate PAC_W. The assertion exists to
-  // REJECT AN UNDEFINED DOMAIN, not to defend against the withdrawn Sv57 profile -- that
-  // profile no longer exists in this architecture, so w = 0 cannot arise from any legal
-  // configuration. It guards against a future mis-configuration, and a zero-width fold is
-  // not a function at all, so failing loudly beats returning a zero-width value.
+  // Notes: not `w == 2 | w == 9` (that re-enumerates PAC_W). w = 0 cannot arise from any
+  // legal configuration; this rejects an undefined domain, not the old Sv57 tier.
   assert(w > 0);
   assert(w == truisa_pac_width);
   truncate(foldXorShifted(x, w, 0, zeros()), truisa_pac_width)
@@ -253,10 +230,8 @@ function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
 // 1b-3. truisaMac -- the interface the architecture fixes. spec/ch04 line 313: the input is
 // hi7 || m || salt, a FIXED-length concatenation, so no two distinct inputs share a shape.
 // why: doc/truisa-deltas.md#mac
-// MAC input = tag || CentroID || salt, a FIXED-length concatenation (spec/ch04), so no two
-// distinct inputs share a shape. The length follows the VA profile -- the tag is
-// mode + N/C wide and the address is truisa_address_width -- so it is spelled as a sum and
-// never as the number 87, which is only right at XLEN 64.
+// MAC input = tag || CentroID || salt, FIXED length (spec/ch04). Spelled as a sum, never
+// as 87 -- that number is only right at XLEN 64.
 type truisa_mac_msg_width : Int =
   truisa_mode_width + truisa_nc_width + truisa_address_width + truisa_salt_width
 
@@ -309,7 +284,6 @@ function verifyPtr(cap : Capability, salt : CapSaltBits) -> bool =
 val  keySalt : Capability -> CapSaltBits
 function keySalt(cap : Capability) -> CapSaltBits = zeros()
 
-// 1b-7. makeCapAligned -- build an aligned-slot pointer and sign it.
 // Warning: The body MUST be `if fail then poison else sign`: Sail evaluates arguments before the
 // call, so `poisonIf(signPtr(q, ...), fail)` would compute a MAC and throw it away (D-99 V-5).
 val  makeCapAligned : (Capability, bits(truisa_nc_width), bool) -> Capability
@@ -457,7 +431,6 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
            carries)
 }
 
-// 1c-3. The checked address setter used by SCADDR.
 // Not "setCapAddr plus a sealed check" -- TruISA has no seal (ADR-0001). Two criteria, in
 // spec order: (1) representable = same slot (bare: the same bit(VA-1) half), (2) intact --
 // SCADDR does have an integrity criterion (ADR-0029 decision 11.5 corrected an earlier
