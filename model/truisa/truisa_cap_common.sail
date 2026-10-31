@@ -632,24 +632,77 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
   }
 }
 
+/* --- 1c-2a. The three predicates behind BOTH address operators ----------------------
+ *
+ * ⭐ Each criterion now has EXACTLY ONE definition. Before this round, criterion (1) and
+ * criterion (2) were written twice -- once in incCapAddrChecked, once in
+ * setCapAddrChecked -- and kept in sync by a comment ("same rule as incCapAddrChecked,
+ * deliberately"). Two copies plus a comment is not an invariant; one copy is. This
+ * follows the layering request of 2026-10-31 (section 3) and its ruling (section 5).
+ *
+ * ⭐ Why the form dispatch lives INSIDE these predicates: what they answer is "is this
+ * pointer legal in ITS OWN form", so the form is an INPUT to the criterion. The one place
+ * where form is read outside a predicate is `carries` in incCapAddrChecked, and that is
+ * an EXIT rule ("an illegal input must not be laundered"), not a criterion. The two are
+ * not inconsistent -- they answer different questions.
+ * ---------------------------------------------------------------------------------- */
+
+/* (1) representable: the result stays in the source pointer's slot; for bare, which has
+ * no slot, it degrades to the same bit (VA-1) HALF. ⛔ NOT `true` for bare: letting CADD
+ * cross the half while SCADDR refuses to would make relative moves and absolute writes
+ * disagree about legality (ADR-0029 decision 11.4). Cost: a bare pointer cannot cross
+ * 2^(VA-1). */
+val  sameSlot : (CapAddrBits, bits(truisa_nc_width), CapPtrForm, CapAddrBits) -> bool
+function sameSlot(a : CapAddrBits, nc : bits(truisa_nc_width), form : CapPtrForm,
+                  b : CapAddrBits) -> bool =
+  if form == FormBare then
+    a[truisa_address_width - 1] == b[truisa_address_width - 1]
+  else
+    getCapSlotBase(a, nc) == getCapSlotBase(b, nc)
+
+/* (2) intact: bare is SKIPPED, and that is load-bearing, not a convenience -- bare
+ * pointers are NEVER signed (ADR-0005 decision 3), so their PAC field stays zero and any
+ * comparison against a signed value would be trivially false; without the skip every bare
+ * `p += 4` in S/M mode would poison, which is the whole of ADR-0011's permissive tier
+ * (ADR-0029 decision 11.2). The salt comes from keySalt, the only producer in the tree
+ * (D-220); read its header before changing anything here. */
+val  ptrIntact : (Capability, CapPtrForm) -> bool
+function ptrIntact(cap : Capability, form : CapPtrForm) -> bool =
+  if form == FormBare then true else verifyPtr(cap, keySalt(cap))
+
+/* (3) a carry out of the address field. ⚠️ Judged on the FIELD, ⛔ never as a
+ * `sign_extend(new48) == sum` self-check: that form is identically false whenever the
+ * result has bit (VA-1) set -- `2^(VA-1) - 1 + 1` is the counter-example -- and would
+ * poison the whole upper half, where the stack and kernel mappings live.
+ *   sum[ptr_width] = 1  => the result went negative, i.e. downward overflow -> ALLOWED
+ *                          (mod 2^VA, same as the blueprint's `c.address + delta`)
+ *   sum[ptr_width] = 0  => value in [0, 2^VA); bits above the field set means a carry */
+val  carryOutOfAddrField : (CapAddrBits, xlenbits) -> bool
+function carryOutOfAddrField(a : CapAddrBits, delta : xlenbits) -> bool = {
+  let sum : bits(truisa_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
+  (sum[truisa_ptr_width] == 0b0)
+  & (sum[truisa_ptr_width - 1 .. truisa_address_width] != zeros())
+}
+
 /* --- 1c-2. The checked pointer increment used by CADD / CADDI ----------------------
+ *
+ * ⭐ SHAPE: arithmetic + delegate. NONE of the three criteria is implemented in this
+ * function. Each has exactly one definition in 1c-2a above; criteria (1) and (2) are
+ * applied by setCapAddrChecked, criterion (3) is applied here. That is the blueprint's
+ * layering -- `incCapAddrChecked` = `c.address + delta` handed to `setCapAddrChecked` --
+ * plus the one thing the blueprint does not need: an explicit carry test. The blueprint
+ * adds two CapAddrBits and lets the sum wrap mod 2^VA; here the addend can carry into the
+ * LABEL, so the sum is computed one bit wider and that carry becomes criterion (3).
  *
  * ⭐ `delta` is XLEN bits, NOT VA bits (ADR-0029 decision 10.1). Passing it truncated
  * silently maps `2^48 + 1` onto `+1`, which leaves criterion (3) permanently unreachable
  * -- the check would still be written and could never fire. The wrong signature was in
  * ADR-0029 decision 8, not in this file.
  *
- * Criteria, in spec/insns/cadd.adoc order (1 representable / 2 intact / 3 no carry):
- *
- * (1) representable -- the result stays inside the source pointer's slot. Bare pointers
- *     have no slot and constrain nothing (ADR-0019), so they short-circuit to true.
- * (2) intact -- on the ALIGNED path the salt is all-zero BY SPEC, not by placeholder:
- *     an aligned slot has no table entry, hence no salt and no re-keying moment, so the
- *     spec fixes that segment at zero and keeps it fixed in phase B too (spec/ch04:251,
- *     :256, ADR-0005 revision 11 item 3). So this is a real verify against the real
- *     (all-zero) salt, not a weakening. What is genuinely unimplemented is the DESCRIPTOR
- *     path: no operator produces that form in phase A (ADR-0029 decision 10.4).
- * (3) no carry -- computed on the FIELD, not on the 64-bit sum.
+ * Where each criterion lives (the rationale is with the predicate, not here):
+ *   (1) sameSlot            -- same slot; bare degrades to the same bit (VA-1) half.
+ *   (2) ptrIntact           -- verify against keySalt; bare is skipped (never signed).
+ *   (3) carryOutOfAddrField -- FIELD overflow; downward overflow is ALLOWED.
  *
  * ⭐ Why copying `pac` through is correct, and not a missing re-sign: the MAC input is
  * (label, CentroID, salt), and the CentroID is a function of the SLOT (C and S), not of
@@ -658,7 +711,7 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
  * rationale of cadd.adoc (ADR-0013 decision 2 / ADR-0005 decision 3 corollary 1). If (1)
  * is ever relaxed, this copy becomes unsound.
  *
- * ⛔ (3) must be the field-overflow test below, NOT `sign_extend(new[VA-1..0]) == new64`.
+ * ⛔ (3) must be the field-overflow test, NOT `sign_extend(new[VA-1..0]) == new64`.
  * That self-check is not merely fragile, it is broken for the upper half of the address
  * space: whenever the result's bit (VA-1) is 1, sign_extend of the low VA bits is a
  * NEGATIVE 64-bit number while the sum is positive, so the two are never equal.
@@ -675,63 +728,29 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
  * blueprint's `cap.address + delta`. ⛔ Do not "tighten" this to "result in [0, 2^VA)" --
  * that poisons every `p -= 1`.
  * ---------------------------------------------------------------------------------- */
+/* ⚠️ Declared ahead of its use, and that is deliberate: incCapAddrChecked delegates to
+ * it, and source order is load-bearing WITHIN a file as well as across files
+ * (CODE_STYLE rule 7). The definition stays in 1c-3 below -- this `val` is the whole
+ * point, so do not "tidy" it away by moving the definition up. */
+val  setCapAddrChecked : (Capability, CapAddrBits) -> Capability
+
 val  incCapAddrChecked : (Capability, xlenbits) -> Capability
 function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
   let form = getCapForm(cap);
-  /* Poisoned and invalid are copied as they are, never laundered into something usable. */
-  if form == FormPoisoned | form == FormInvalid then cap
-  else {
-    let a : CapAddrBits = cap.address[truisa_address_width - 1 .. 0];
-
-    /* One bit wider than XLEN: `a` zero-extended and `delta` sign-extended, so the sum
-     * cannot wrap inside ptr_width+1 bits.
-     *   sum[ptr_width] = 1  => negative result, i.e. downward overflow -> allowed
-     *   sum[ptr_width] = 0  => value in [0, 2^ptr_width); anything above the field is a
-     *                          carry, and that is exactly criterion (3). */
-    let sum : bits(truisa_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-    let overflow : bool =
-      (sum[truisa_ptr_width] == 0b0)
-      & (sum[truisa_ptr_width - 1 .. truisa_address_width] != zeros());
-
-    let new48 : CapAddrBits = truncate(sum, truisa_address_width);
-
-    /* Criterion (1) -- representable. A bare pointer has no slot, so the requirement
-     * degrades to staying in the same bit (VA-1) HALF, exactly as in setCapAddrChecked
-     * below (ADR-0029 decision 11.4). ⚠️ It is NOT `true`: letting CADD cross the half
-     * while SCADDR refuses to would mean relative moves and absolute writes disagree
-     * about legality -- the very incoherence isa/07 section 7.7.10 uses to reject the
-     * [base,bound] reading. Cost: a bare pointer cannot cross 2^(VA-1). */
-    let same_slot : bool =
-      if form == FormBare then a[truisa_address_width - 1] == new48[truisa_address_width - 1]
-      else getCapSlotBase(a, cap.nc) == getCapSlotBase(new48, cap.nc);
-
-    /* Criterion (2) -- intact. ⚠️⚠️ SKIPPED for bare, and that is load-bearing, not a
-     * convenience: bare pointers are NEVER signed (ADR-0005 decision 3), so their PAC
-     * field stays zero and any comparison against a signed value would be trivially
-     * FALSE. Without the skip, every bare-pointer `p += 4` in S/M mode would poison,
-     * which is the whole of ADR-0011's permissive tier (ADR-0029 decision 11.2).
-     *
-     * ⭐ The salt is NOT decided here. It comes from keySalt (D-220), the only producer in
-     * the tree. On an aligned pointer that is the all-zero salt the spec fixes for that
-     * form, so the check is genuinely performed and genuinely passes; its only
-     * discriminating power in phase A is therefore "cs1 is not bare".
-     *
-     * ⛔ Do not "put a real salt here" when the descriptor table lands. The salt stopped
-     * being this site's business, and a local change would reintroduce exactly the
-     * ambiguity D-220 removed -- worse, if sign and verify were changed together it would
-     * go green while silently violating the spec's all-zero rule for aligned slots.
-     * Read keySalt's header ("two paths, one exit") before touching anything. */
-    let intact : bool =
-      if form == FormBare then true else verifyPtr(cap, keySalt(cap));
-
-    let newCap : Capability = struct {
-      mode    = cap.mode,
-      nc      = cap.nc,
-      pac     = cap.pac,
-      address = sign_extend(new48),
-    };
-    poisonIf(newCap, overflow | not(same_slot) | not(intact))
-  }
+  let a : CapAddrBits = cap.address[truisa_address_width - 1 .. 0];
+  let sum : bits(truisa_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
+  /* ⚠️ THE FORM GATE IS LOAD-BEARING, not defensive noise. `poisonIf` runs AFTER the
+   * delegation, so without this gate an ILLEGAL input that happens to overflow would be
+   * poisoned by the outer call even though criteria (1) and (2) never ran -- FormInvalid
+   * laundered into FormPoisoned. Both are unusable, but they are NOT the same state:
+   * GCADDR projects a poisoned pointer to its real address and an invalid one to its
+   * stored value, so the difference is observable, and changing it would be a criterion
+   * change rather than a refactor. */
+  let carries : bool =
+    (form != FormPoisoned) & (form != FormInvalid) & carryOutOfAddrField(a, delta);
+  /* Poisoned / invalid inputs come back untouched from setCapAddrChecked's own form
+   * dispatch, and `carries` is false for them, so they are returned exactly as given. */
+  poisonIf(setCapAddrChecked(cap, truncate(sum, truisa_address_width)), carries)
 }
 
 /* --- 1c-3. The checked address setter used by SCADDR -------------------------------
@@ -760,29 +779,21 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
  * defined here: nothing in the TruISA chain calls it, and an unused top-level symbol is
  * surface with no reader. One line to add if a future instruction needs it.
  * ---------------------------------------------------------------------------------- */
-val  setCapAddrChecked : (Capability, CapAddrBits) -> Capability
 function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability = {
   let form = getCapForm(cap);
+  /* Illegal inputs are copied as they are, never laundered into something usable. This is
+   * the ONE place the form is dispatched for the address setter. */
   if form == FormPoisoned | form == FormInvalid then cap
   else {
     let a : CapAddrBits = cap.address[truisa_address_width - 1 .. 0];
-    /* (1) representable: same slot, or -- for bare, which has no slot -- the same
-     * bit (VA-1) half. Same rule as incCapAddrChecked, deliberately (decision 11.4). */
-    let representable : bool =
-      if form == FormBare then addr[truisa_address_width - 1] == a[truisa_address_width - 1]
-      else getCapSlotBase(a, cap.nc) == getCapSlotBase(addr, cap.nc);
-    /* (2) intact: skipped for bare for the same reason as in 1c-2 (bare is never signed,
-     * so the check would be trivially false and SCADDR would poison every bare address
-     * write). The salt comes from keySalt, the only producer in the tree (D-220) -- this
-     * site carries no salt knowledge at all. */
-    let intact : bool =
-      if form == FormBare then true else verifyPtr(cap, keySalt(cap));
     let newCap : Capability = struct {
       mode    = cap.mode,
       nc      = cap.nc,
       pac     = cap.pac,
       address = sign_extend(addr),
     };
-    poisonIf(newCap, not(representable) | not(intact))
+    /* Criteria (1) then (2), in the spec's order, so a future xtval can say which failed
+     * first. One call each -- the definitions are in 1c-2a, not here. */
+    poisonIf(newCap, not(sameSlot(a, cap.nc, form, addr)) | not(ptrIntact(cap, form)))
   }
 }
