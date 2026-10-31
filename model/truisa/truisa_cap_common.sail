@@ -62,6 +62,16 @@ let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
 // ⚠️ The 16 is NOT in spec/ch04 -- it says 32. Cross-XLEN choice, reported for a ruling.
 // It is an Int (not a `type = if ... then bits(..)`) because truisa_mac_msg_width has to
 // consume the number, and a conditional type cannot be asked for its width.
+//
+// ⛔ NOT `truisa_meta_width * 2`, tempting as that is. It happens to give 32 and 16 at the
+// two profiles in use, but the salt width is fixed by its CARRIER, not by the layout:
+// ADR-0005 rev 8 carries it in {bits 127-112, bits 63-48} -- 32 bits, no more. Written as
+// a function of the layout it silently collapses at the other ADR-0003 profiles:
+//   Sv39 -> meta = 64-39 = 25 -> salt = 50 bits, which does not fit the carrier;
+//   Sv57 -> meta = 64-57 =  7 -> salt = 14 bits, i.e. a 16384-value salt space.
+// ⚠️ Sail will not complain about either: bits(50) is a perfectly well-formed type, and
+// nothing in the model knows what the carrier can hold. The failure is silent and shows up
+// as a spec/model divergence, not as a build error.
 type truisa_salt_width : Int = if xlen == 32 then 16 else 32
 let  truisa_salt_width = sizeof(truisa_salt_width)
 
