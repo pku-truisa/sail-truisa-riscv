@@ -1,12 +1,17 @@
 /*=======================================================================================*
  *  TruISA: placeholder for model/cheri/cheri_csr_ext.sail
  *
- *  Status: ORDERED, NOT YET WRITTEN (D-168 #9 / D-132 改动 2).
+ *  Status: READY TO WRITE (D-199 section 1.2; content fixed by D-132 改动 2).
  *  Content is already decided: six is_CSR_defined cases and six csr_name_map
  *  entries for 0x5C0-0x5C5 (xdtp / xpkey0 / xpkey1 / xfailcnt / xfailctl /
  *  xfailkey). The scattered clauses must sit between csr_begin and csr_end
- *  (see CODE_STYLE.md:147). The architecture group owes the normative text
- *  (A-5 / D-8). Do not delete this file: deleting it cancels an order.
+ *  (see CODE_STYLE.md:147). ⭐ The normative text is DELIVERED -- do not wait for it:
+ *    - formal spec: spec/ch07-instructions.adoc (xdtp section), plus
+ *      spec/appendix/a-encoding.adoc (CSR encodings) and
+ *      spec/ch05-descriptor-table.adoc (table-root semantics);
+ *    - drafts: docs/isa/07 section 7.7.13, docs/isa/05;
+ *    - ruling: ADR-0011 (CSR table, 0x5C0-0x5C5, contiguous, no holes).
+ *  Do not delete this file: deleting it cancels an order.
  *
  *  Why this file exists: the fork mirrors the CHERI tree one file for one, so that
  *  the two models can be read side by side and every position in model/CMakeLists.txt
@@ -30,6 +35,6 @@
  *       invent a definition that merely satisfies the type checker (D-69 section 5).
  *=======================================================================================*/
 
-/* Nothing defined yet: ORDERED, NOT YET WRITTEN -- see Status at the top (D-132 改动 2).
+/* Nothing defined yet: READY TO WRITE -- see Status at the top (D-199 section 1.2).
  * ⛔ Do not delete this file and do not add a stub: the six CSR entries are a decision
  * already taken, and a stub would satisfy the type checker while hiding that. */
