@@ -37,24 +37,6 @@ type truisa_pac_width : Int =
   truisa_ptr_width - truisa_address_width - truisa_mode_width - truisa_nc_width
 let  truisa_pac_width = sizeof(truisa_pac_width)
 
-// Size of the capability in bytes: 8 at 64-bit, 4 at 32-bit. Written as a conditional on
-// truisa_ptr_width, not as `2 ^ log2_cap_size` -- that route reaches the config variable
-// and cannot be folded (D-94/D-96). ⛔ No second constant alongside this expression.
-type cap_size : Int = if truisa_ptr_width == 64 then 8 else 4
-let  cap_size = sizeof(cap_size)
-
-
-/*=======================================================================================*/
-/*  1a -- the capability itself, and the operators that only READ it.                     */
-/*                                                                                       */
-/*  CR-MAC-01 Rev.1 items 1a-1 .. 1a-8. No MAC, no signing, no table: 1b owns those.      */
-/*=======================================================================================*/
-
-// Type names keep the blueprint's spelling (cheri_cap_common.sail:26/29) so the two files
-// can be read side by side; the WIDTHS are TruISA's, which is the whole point.
-type CapBits    = bits(8 * cap_size)
-type CapAddrBits = bits(truisa_address_width)
-type CapTagBits  = bits(truisa_mode_width + truisa_nc_width)
 
 // The REGISTER representation is wider than the memory encoding (ADR-0029 decision 1):
 // `address` is a full machine word, so the struct exceeds CapBits.
@@ -73,7 +55,39 @@ let  truisa_meta_width = sizeof(truisa_meta_width)
 type truisa_cap_repr_width : Int = truisa_ptr_width + truisa_meta_width
 let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
 
+/*=======================================================================================*/
+/*  1a -- the capability itself, and the operators that only READ it.                     */
+/*                                                                                       */
+/*  CR-MAC-01 Rev.1 items 1a-1 .. 1a-8. No MAC, no signing, no table: 1b owns those.      */
+/*=======================================================================================*/
+
+// ---------------------------------------------------------------------------------
+// Alias layer. `Cap*` keeps the blueprint's spelling (cheri_cap_common.sail:26/29) so the
+// two files read side by side; it exists ONLY so the blueprint's operator bodies can be
+// reused verbatim. Every one is defined from a `truisa_*` width above -- none carries a
+// constant of its own. Read the `truisa_*` block first.
+// ---------------------------------------------------------------------------------
+
+// Size of the capability in bytes: 8 at XLEN 64, 4 at 32. Spelled as a conditional, not as
+// `2 ^ log2_cap_size` -- that route reaches the config variable and cannot be folded
+// (D-94/D-96). ⛔ No second constant alongside this expression.
+type cap_size : Int = if truisa_ptr_width == 64 then 8 else 4
+let  cap_size = sizeof(cap_size)
+
+type CapBits     = bits(8 * cap_size)
+type CapAddrBits = bits(truisa_address_width)
+type CapTagBits  = bits(truisa_mode_width + truisa_nc_width)
 type CapMetaBits = bits(truisa_meta_width)
+
+// The PAC slice, written VA + PAC_W - 1 .. VA -- never as literal bit numbers, because the
+// slice moves with the VA profile (ADR-0003).
+type CapPacBits  = bits(truisa_pac_width)
+
+/* salt is 32 bits (spec/ch04 line 183). Descriptor mode reads it from the table entry;
+ * aligned-slot mode uses all zeros (ADR-0005 rev 11 item 3). ⚠️ The segment is NOT
+ * omitted in the aligned case even though it is zero -- omitting it would change the
+ * 87-bit length that makes the encoding unambiguous (spec/ch04 line 313). */
+type cap_salt = bits(32)
 
 // 1a-1. The capability has two views, of different width (ADR-0029 decision 1):
 //   memory    mode(1) | N/C(6) | PAC(9) | address(48)   <- CapBits; what SCEQ compares
@@ -227,19 +241,11 @@ function truisaMac(key : bits(128), msg : bits(87)) -> bits(truisa_pac_width) =
   foldXor(key, truisa_pac_width)
   ^ foldXor((zeros() : bits(41)) @ msg, truisa_pac_width)
 
-// 1b-4. The PAC slice and the salt type. Written as VA + PAC_W - 1 .. VA, never as literal
-// bit numbers -- the slice moves with the VA profile (ADR-0003).
-type CapPacBits = bits(truisa_pac_width)
 
 val  getCapPac : Capability -> CapPacBits
 function getCapPac(cap : Capability) -> CapPacBits =
   capToMetadataBits(cap)[truisa_pac_width - 1 .. 0]
 
-/* salt is 32 bits (spec/ch04 line 183). Descriptor mode reads it from the table entry;
- * aligned-slot mode uses all zeros (ADR-0005 rev 11 item 3). ⚠️ The segment is NOT
- * omitted in the aligned case even though it is zero -- omitting it would change the
- * 87-bit length that makes the encoding unambiguous (spec/ch04 line 313). */
-type cap_salt = bits(32)
 
 // 1b-5. signPtr -- the single signing operator (spec/ch04 line 233-242), called ONLY at PTR
 // production points. The m = 0 cases are resolved by D-108 ruling 甲: for a one-byte slot at
