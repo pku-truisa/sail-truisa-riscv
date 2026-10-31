@@ -485,10 +485,35 @@ function verifyPtr(cap : Capability, salt : cap_salt) -> bool =
   getCapPac(cap) == getCapPac(signPtr(cap, salt))
 
 /* ------------------------------------------------------------------------------------
+ * 1b-6b. keySalt -- THE ONLY place a salt is obtained (D-220).
+ *
+ * ⛔ No call site passes a salt literal. Every `signPtr` / `verifyPtr` second argument
+ * must be `keySalt(...)`, and this is enforced by reading the call sites, not by trust:
+ * while the literal sat in a shared `else` branch, that branch carried no form
+ * information, so "is the descriptor side wired up?" could not be grepped at all (D-220
+ * section 4.2 -- an ungrepable criterion is not a criterion).
+ *
+ * ⭐ Two paths, one exit (spec/ch04 "authentication code", ADR-0005 revision 11 item 3):
+ *   - aligned: the salt is all-zero BY SPEC and permanently so -- an aligned slot has no
+ *     table entry, hence no salt and no refresh moment. It does NOT become non-zero when
+ *     the descriptor table lands.
+ *   - descriptor: the salt carried by the table entry. ⚠️ Deliberately not written yet:
+ *     nothing in phase A produces that form (CapPtrForm in truisa_types.sail), so the arm
+ *     is unreachable, and writing it now would need either a second zeros() or a stub
+ *     that lies about having an entry. Phase B rewrites THIS function only, and must
+ *     leave the aligned arm byte-for-byte unchanged (D-220 section 4.2 criterion 3).
+ *
+ * ⛔ Do not change cap_salt's type or width as part of wiring this up: this function
+ * swaps where the value comes from, not what it is (D-220 section 4.3).
+ * ---------------------------------------------------------------------------------- */
+val  keySalt : Capability -> cap_salt
+function keySalt(cap : Capability) -> cap_salt = zeros()
+
+/* ------------------------------------------------------------------------------------
  * 1b-7. makeCapAligned -- build an aligned-slot pointer and sign it.
  *
  * ⭐⭐ The body MUST be `if fail then poison else sign`. Sail evaluates arguments before
- * a call, so `poisonIf(signPtr(q, zeros()), fail)` -- which type-checks and looks
+ * a call, so `poisonIf(signPtr(q, keySalt(q)), fail)` -- which type-checks and looks
  * equivalent -- computes a MAC on the failure path and throws it away. D-99 V-5 made
  * this a call-COUNT test (CR-TEST-01 T-10) precisely because the value is identical
  * either way and no shape test can see the difference.
@@ -509,7 +534,7 @@ function makeCapAligned(parent : Capability, n : bits(truisa_nc_width), fail : b
        * so the result is sign-extended back into canonical form (ADR-0029 decision 5). */
       address = sign_extend(getCapSlotBase(parent.address[truisa_address_width - 1 .. 0], n)),
     };
-    signPtr(q, zeros())
+    signPtr(q, keySalt(q))
   }
 
 /* ------------------------------------------------------------------------------------
@@ -681,36 +706,23 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
       else getCapSlotBase(a, cap.nc) == getCapSlotBase(new48, cap.nc);
 
     /* Criterion (2) -- intact. ⚠️⚠️ SKIPPED for bare, and that is load-bearing, not a
-     * convenience: on an aligned pointer `verifyPtr(cap, zeros())` compares against the
-     * all-zero salt, which is exactly the salt that form is defined to carry (spec/ch04),
-     * so the check is genuinely performed and genuinely passes; its only discriminating
-     * power in phase A is therefore "cs1 is not bare". Aligned pointers are signed by
-     * makeCapAligned with zeros() for the same spec reason, and bare pointers are
-     * NEVER signed (ADR-0005 decision 3) -- so on bare it is trivially FALSE. Without the
-     * skip, every bare-pointer `p += 4` in S/M mode would poison, which is the whole of
-     * ADR-0011's permissive tier (ADR-0029 decision 11.2).
+     * convenience: bare pointers are NEVER signed (ADR-0005 decision 3), so their PAC
+     * field stays zero and any comparison against a signed value would be trivially
+     * FALSE. Without the skip, every bare-pointer `p += 4` in S/M mode would poison,
+     * which is the whole of ADR-0011's permissive tier (ADR-0029 decision 11.2).
      *
-     * ⚠️⚠️ TWO CASES SHARE THIS `else` AND THEY MUST BE TOLD APART. Treating the whole
-     * branch as "a phase-A placeholder" is wrong and has already misled one review round
-     * (D-198 correction):
+     * ⭐ The salt is NOT decided here. It comes from keySalt (D-220), the only producer in
+     * the tree. On an aligned pointer that is the all-zero salt the spec fixes for that
+     * form, so the check is genuinely performed and genuinely passes; its only
+     * discriminating power in phase A is therefore "cs1 is not bare".
      *
-     *   - FormAligned  -- `zeros()` is the CORRECT FINAL VALUE. The aligned slot has no
-     *     table entry, therefore no salt and no re-keying moment; the spec fixes the salt
-     *     segment at all-zero and keeps it there (spec/ch04:251, :256; ADR-0005 revision
-     *     11 item 3). It does NOT change in phase B.
-     *   - FormDescriptor -- `zeros()` IS a placeholder. No operator produces that form in
-     *     phase A (CapPtrForm in truisa_types.sail), so this half is unreachable today;
-     *     when the descriptor table lands the salt must come from the entry / DLB.
-     *
-     * ⛔ CONSEQUENCE FOR PHASE B: this single `else` cannot survive as it is. Rewiring the
-     * salt here would also change the aligned path, which the spec forbids. Split the
-     * branch by form FIRST, then wire the descriptor side -- and only then can "descriptor
-     * salt is wired" be grep-checked (descriptor side: no zeros() left; aligned side: its
-     * zeros() must remain). The old warning said a missed update would make every pointer
-     * fail silently; the sharper risk today is the opposite: a global replace would break
-     * the aligned path, which looks like progress. */
+     * ⛔ Do not "put a real salt here" when the descriptor table lands. The salt stopped
+     * being this site's business, and a local change would reintroduce exactly the
+     * ambiguity D-220 removed -- worse, if sign and verify were changed together it would
+     * go green while silently violating the spec's all-zero rule for aligned slots.
+     * Read keySalt's header ("two paths, one exit") before touching anything. */
     let intact : bool =
-      if form == FormBare then true else verifyPtr(cap, zeros());
+      if form == FormBare then true else verifyPtr(cap, keySalt(cap));
 
     let newCap : Capability = struct {
       mode    = cap.mode,
@@ -761,11 +773,10 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
       else getCapSlotBase(a, cap.nc) == getCapSlotBase(addr, cap.nc);
     /* (2) intact: skipped for bare for the same reason as in 1c-2 (bare is never signed,
      * so the check would be trivially false and SCADDR would poison every bare address
-     * write). `zeros()` here is the SPEC salt for the aligned form and a placeholder for
-     * the descriptor form -- read the long warning at 1c-2 before touching it, in
-     * particular the "split the branch first" requirement. */
+     * write). The salt comes from keySalt, the only producer in the tree (D-220) -- this
+     * site carries no salt knowledge at all. */
     let intact : bool =
-      if form == FormBare then true else verifyPtr(cap, zeros());
+      if form == FormBare then true else verifyPtr(cap, keySalt(cap));
     let newCap : Capability = struct {
       mode    = cap.mode,
       nc      = cap.nc,
