@@ -58,6 +58,18 @@ let  truisa_meta_width = sizeof(truisa_meta_width)
 type truisa_cap_repr_width : Int = truisa_ptr_width + truisa_meta_width
 let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
 
+// Salt width: 32 bits at XLEN 64 (spec/ch04 line 183), 16 at XLEN 32.
+// ⚠️ The 16 is NOT in spec/ch04 -- it says 32. Cross-XLEN choice, reported for a ruling.
+// It is an Int (not a `type = if ... then bits(..)`) because truisa_mac_msg_width has to
+// consume the number, and a conditional type cannot be asked for its width.
+type truisa_salt_width : Int = if xlen == 32 then 16 else 32
+let  truisa_salt_width = sizeof(truisa_salt_width)
+
+type truisa_tag_width : Int = truisa_mode_width + truisa_nc_width
+let  truisa_tag_width = sizeof(truisa_tag_width)
+
+let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
+
 /*=======================================================================================*/
 /*  1a -- the capability itself, and the operators that only READ it.                     */
 /*                                                                                       */
@@ -79,25 +91,25 @@ let  cap_size = sizeof(cap_size)
 
 type CapBits     = bits(8 * cap_size)
 type CapAddrBits = bits(truisa_address_width)
-type CapTagBits  = bits(truisa_mode_width + truisa_nc_width)
+type CapTagBits  = bits(truisa_tag_width)
 
 // The poison tag: mode = 0, N/C = all ones. Written symbolically, not as `0b0111111`:
 // that literal is 7 bits only at XLEN 64 -- at XLEN 32 the tag is one bit shorter, and
 // Sail will not reduce `1 + (if xlen == 32 then 5 else 6)` to a number it can compare a
 // literal against. docs/isa/03 section 3.6 spells the code in 7-bit form for the same
 // reason it is written here: 64-bit is the case that document works in.
-let truisa_poison_tag : CapTagBits = 0b0 @ ones()
 type CapMetaBits = bits(truisa_meta_width)
 
 // The PAC slice, written VA + PAC_W - 1 .. VA -- never as literal bit numbers, because the
 // slice moves with the VA profile (ADR-0003).
 type CapPacBits  = bits(truisa_pac_width)
 
-/* salt is 32 bits (spec/ch04 line 183). Descriptor mode reads it from the table entry;
+/* salt: 32 bits at XLEN 64, 16 at XLEN 32 (the latter is NOT in spec/ch04 -- see
+ * truisa_salt_width). Descriptor mode reads it from the table entry;
  * aligned-slot mode uses all zeros (ADR-0005 rev 11 item 3). ⚠️ The segment is NOT
  * omitted in the aligned case even though it is zero -- omitting it would change the
  * 87-bit length that makes the encoding unambiguous (spec/ch04 line 313). */
-type cap_salt = bits(32)
+type cap_salt = bits(truisa_salt_width)
 
 // 1a-1. The capability has two views, of different width (ADR-0029 decision 1):
 //   memory    mode(1) | N/C(6) | PAC(9) | address(48)   <- CapBits; what SCEQ compares
@@ -255,7 +267,7 @@ function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
 // mode + N/C wide and the address is truisa_address_width -- so it is spelled as a sum and
 // never as the number 87, which is only right at XLEN 64.
 type truisa_mac_msg_width : Int =
-  truisa_mode_width + truisa_nc_width + truisa_address_width + 32
+  truisa_mode_width + truisa_nc_width + truisa_address_width + truisa_salt_width
 
 val  truisaMac : (bits(128), bits(truisa_mac_msg_width)) -> bits(truisa_pac_width)
 function truisaMac(key : bits(128), msg : bits(truisa_mac_msg_width)) -> bits(truisa_pac_width) =
