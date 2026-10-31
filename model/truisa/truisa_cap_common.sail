@@ -9,27 +9,19 @@
 /*  TruISA has no metadata and no in-pointer bounds.                                       */
 /*=======================================================================================*/
 
-// Width block: everything below derives from truisa_ptr_width, a literal tied to xlen by a
-// constraint -- not from xlen itself: a width that reaches the config variable cannot be
-// folded, and Sail folds 2^ but not log2 (D-96). why: doc/truisa-deltas.md#widths
-
-/* Target constant 1: the pointer width. Change this ONE line for RV32. */
-type truisa_ptr_width : Int = 64
+// Width block. truisa_ptr_width IS xlen -- the blueprint's shape
+// (cheri_cap_common.sail:14 `type cap_addr_width : Int = xlen`), so there is no duplicate
+// constant and nothing to keep in sync.
+type truisa_ptr_width : Int = xlen
 let  truisa_ptr_width = sizeof(truisa_ptr_width)
-
-/* ⭐ The seam that makes the constant above safe. It turns "this file says 64 but the
- * build is rv32" into a type error at configure time. Without it the literal would be
- * an unchecked duplicate of the config value.
- * TRUISA DELTA: the blueprint has no such constraint; it never writes a width down. */
-constraint truisa_ptr_width == xlen
 
 /* Bits 63-57: one mode bit plus six bits of N/C. */
 type truisa_mode_width : Int = 1
 let  truisa_mode_width = sizeof(truisa_mode_width)
 
 /* N/C must be able to name any bit position of the pointer, so its width is log2 of the
- * pointer width: 6 for 64 bits, 5 for 32. Written as a conditional on a LITERAL rather
- * than as log2(truisa_ptr_width) because Sail does not fold log2 (see above).
+ * pointer width: 6 at XLEN 64, 5 at 32. Spelled as a conditional rather than
+ * log2(truisa_ptr_width) because Sail folds 2^ but not log2.
  * TRUISA DELTA: the blueprint hard-codes 6 with no explanation of where it comes from. */
 type truisa_nc_width : Int = if truisa_ptr_width == 64 then 6 else 5
 let  truisa_nc_width = sizeof(truisa_nc_width)
@@ -39,7 +31,8 @@ let  truisa_nc_width = sizeof(truisa_nc_width)
 type truisa_address_width : Int = 48
 let  truisa_address_width = sizeof(truisa_address_width)
 
-/* Everything left between the label and the address. Sv48 -> 64-48-1-6 = 9. */
+/* Everything left between the label and the address:
+ * truisa_ptr_width - truisa_address_width - truisa_mode_width - truisa_nc_width. */
 type truisa_pac_width : Int =
   truisa_ptr_width - truisa_address_width - truisa_mode_width - truisa_nc_width
 let  truisa_pac_width = sizeof(truisa_pac_width)
@@ -68,6 +61,11 @@ type CapTagBits  = bits(truisa_mode_width + truisa_nc_width)
 // ⛔ Never restate truisa_pac_width (:61) in terms of truisa_meta_width -- they are
 // different quantities, and the second is derived from the first.
 // why: doc/truisa-deltas.md#repr
+// The VA profile must fit inside the pointer. This is the constraint that lets Sail prove
+// `bits(truisa_ptr_width - truisa_address_width)` is well-formed: the subtraction itself is
+// fine, it is the non-negativity proof that a config variable cannot supply on its own.
+constraint truisa_address_width <= truisa_ptr_width
+
 type truisa_meta_width : Int = truisa_ptr_width - truisa_address_width
 let  truisa_meta_width = sizeof(truisa_meta_width)
 

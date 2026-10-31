@@ -30,6 +30,30 @@
  * ---------------------------------------------------------------------------------- */
 ```
 
+> ⚠️ **2026-10-31 更正（实测，用户 review 提出）**：上面第 1 条**结论歪了 —— 归因错**。
+>
+> `type truisa_ptr_width : Int = xlen` **可以写**。CHERI 自己就是
+> `type cap_addr_width : Int = xlen`（`cheri_cap_common.sail:14`），而且它的
+> `cap_len_width = cap_addr_width + 1` 就是 `bits(xlen + 1)`，在链上一直跑得通。
+>
+> 当初真正撞的不是"config 变量不能折叠"，而是**减法后的非负性无法证明**：
+>
+> ```text
+> Type error: truisa/truisa_cap_common.sail:70.0-42
+>  70 | type CapMetaBits = bits(truisa_meta_width)
+>     |                    ^---------------------^
+>     | Well-formedness check failed for type
+>     | Could not prove truisa_meta_width >= 0 for type constructor bits
+> ```
+>
+> 规律：**加法与比较可以**（`bits(xlen)`、`bits(xlen + 1)`），**减法不行** ——
+> `bits(n)` 要求证明 `n >= 0`，而 config 变量自己供不出这个证明。
+>
+> 修法：`constraint truisa_address_width <= truisa_ptr_width`。
+> 这条约束有**真实语义**（VA profile 不能超过指针宽度），不是为了绑住一个重复常量。
+> 于是 `= 64` 和 `constraint truisa_ptr_width == xlen` 两条**一起删掉**，
+> 与蓝本同形，且少一个会漂移的常量。
+
 ## layout
 
 ```text
