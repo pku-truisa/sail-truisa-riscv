@@ -186,7 +186,7 @@
  *     that lies about having an entry. Phase B rewrites THIS function only, and must
  *     leave the aligned arm byte-for-byte unchanged (D-220 section 4.2 criterion 3).
  *
- * ⛔ Do not change cap_salt's type or width as part of wiring this up: this function
+ * ⛔ Do not change CapSalt's type or width as part of wiring this up: this function
  * swaps where the value comes from, not what it is (D-220 section 4.3).
  * ---------------------------------------------------------------------------------- */
 ```
@@ -336,7 +336,7 @@
 > 上半 `truisa_*`（定义之所在），下半 `Cap*`（纯别名层）。
 > 原因就是 `Cap*` 只为复用蓝本的函数体而存在 —— 每一个都由上面某个 `truisa_*` 宽度定义，
 > 自身不带任何常量。原来 `cap_size` 夹在 `truisa_*` 中间、`CapMetaBits` 落在
-> `truisa_meta_width` 之后、`CapPacBits`/`cap_salt` 掉在 1b 段里，读起来要把三类东西来回跳。
+> `truisa_meta_width` 之后、`CapPacBits`/`CapSalt` 掉在 1b 段里，读起来要把三类东西来回跳。
 
 ## repr
 
