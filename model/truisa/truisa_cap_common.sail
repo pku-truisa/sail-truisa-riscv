@@ -128,7 +128,7 @@ type CapPacBits  = bits(truisa_pac_width)
  * aligned-slot mode uses all zeros (ADR-0005 rev 11 item 3). ⚠️ The segment is NOT
  * omitted in the aligned case even though it is zero -- omitting it would change the
  * 87-bit length that makes the encoding unambiguous (spec/ch04 line 313). */
-type CapSalt = bits(truisa_salt_width)
+type CapSaltBits = bits(truisa_salt_width)
 
 // 1a-1. The capability has two views, of different width (ADR-0029 decision 1):
 //   memory    mode(1) | N/C(6) | PAC(9) | address(48)   <- CapBits; what SCEQ compares
@@ -323,8 +323,8 @@ function getCapPac(cap : Capability) -> CapPacBits =
 // production points. The m = 0 cases are resolved by D-108 ruling 甲: for a one-byte slot at
 // address 0 it is reachable and legal, while N = VA returning 0 is an ADR-0026 ruling.
 // why: doc/truisa-deltas.md#signptr
-val  signPtr : (Capability, CapSalt) -> Capability
-function signPtr(cap : Capability, salt : CapSalt) -> Capability = {
+val  signPtr : (Capability, CapSaltBits) -> Capability
+function signPtr(cap : Capability, salt : CapSaltBits) -> Capability = {
   let hi7 = getCapTagBits(cap);
   /* Slices [VA-1..0]: getCapCentroID's first parameter is CapAddrBits (48), not the
    * 64-bit struct field. The redundant high bits are not part of the address. */
@@ -340,22 +340,22 @@ function signPtr(cap : Capability, salt : CapSalt) -> Capability = {
 
 // 1b-6. verifyPtr -- recompute and compare (D-99). Signing is idempotent on the fields that
 // matter, so "compare against signPtr(cap)" is a real test and not a tautology.
-val  verifyPtr : (Capability, CapSalt) -> bool
-function verifyPtr(cap : Capability, salt : CapSalt) -> bool =
+val  verifyPtr : (Capability, CapSaltBits) -> bool
+function verifyPtr(cap : Capability, salt : CapSaltBits) -> bool =
   getCapPac(cap) == getCapPac(signPtr(cap, salt))
 
 // 1b-6b. keySalt -- THE ONLY place a salt is obtained (D-220). No call site passes a
 // literal; that is what makes "is the descriptor side wired up?" greppable at all.
 //   aligned     -> all-zero BY SPEC, permanently (spec/ch04; ADR-0005 rev 11 item 3).
 //   descriptor  -> the entry's salt; NOT written yet -- phase A produces no such form.
-// Do not change CapSalt's type or width here (D-220 section 4.3).
+// Do not change CapSaltBits's type or width here (D-220 section 4.3).
 // why: doc/truisa-deltas.md#keysalt
 // ⚠️ `cap` is unused in phase A BY DESIGN, not by oversight (D-223 ruling 5): the salt is
 // a constant here, so there is nothing to look up. Phase B computes the entry identifier
 // FROM this argument; do not change the signature to (form, nc) -- that would push form
 // knowledge back to the call sites, which is the thing keySalt exists to prevent.
-val  keySalt : Capability -> CapSalt
-function keySalt(cap : Capability) -> CapSalt = zeros()
+val  keySalt : Capability -> CapSaltBits
+function keySalt(cap : Capability) -> CapSaltBits = zeros()
 
 // 1b-7. makeCapAligned -- build an aligned-slot pointer and sign it.
 // ⚠️ The body MUST be `if fail then poison else sign`: Sail evaluates arguments before the
