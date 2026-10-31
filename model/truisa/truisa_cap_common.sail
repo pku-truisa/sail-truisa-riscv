@@ -94,8 +94,10 @@ struct Capability = {
   address : bits(truisa_ptr_width),
 }
 
-// The poison value: mode 0, N/C all ones, rest zero (docs/isa/03 3.6) -- not CHERI's
-// tag-clearing.
+// The poison value WITH A ZERO ADDRESS: mode 0, N/C all ones, PAC 0, address 0
+// (docs/isa/03 3.6) -- not CHERI's tag-clearing. This is the `addr(x) = 0` special case of
+// `0x7E00 << 48 | addr(x)` (ADR-0003 r25). Real poisoning goes through poisonIf, which
+// keeps the caller's address.
 let truisa_poison_cap : Capability = struct {
   mode    = 0b0,
   // `ones(...)` not a 6-bit literal: the field is truisa_nc_width wide, not always 6.
@@ -191,12 +193,16 @@ function getCapCentroID(p : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBi
 }
 
 // 1a-8. poisonIf -- the single failure exit of every PTR-producing instruction.
+// The ADDRESS IS PRESERVED. `bits 47-0 = addr(x)` is a REQUIREMENT at Sv48, not advice
+// (ADR-0003 revision 25 / D-126), and isa/07 writes this operator as
+// `poisonCode(getCapAddr(cap))`. Two things break without it: GCADDR can no longer return
+// the real address of a poisoned pointer, and `poison` stops being idempotent.
 // Sail is NOT lazy: `poisonIf(sign(cap), fail)` evaluates sign() even when fail holds,
 // which is why makeCapAligned uses `if fail then poison else sign` (D-99 V-5).
 // why: doc/truisa-deltas.md#poisonif
 val  poisonIf : (Capability, bool) -> Capability
 function poisonIf(cap : Capability, cond : bool) -> Capability =
-  if cond then truisa_poison_cap else cap
+  if cond then { truisa_poison_cap with address = cap.address } else cap
 
 // 1b. The authentication segment: stub key, folding XOR, sign/verify, and the two producers
 // that need a signature (makeCapAligned, setCapBounds).
