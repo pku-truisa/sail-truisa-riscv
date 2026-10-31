@@ -1,31 +1,40 @@
 /*=======================================================================================*/
-/*  TruISA: the 64-bit capability width, for RV64.                                      */
+/*  TruISA: the 64-bit capability format, for RV64.                                     */
 /*                                                                                       */
 /*  ⚠️ READ THE BLUEPRINT PAIRING CAREFULLY -- it is the opposite of what the file names  */
 /*  suggest. In CHERI:                                                                    */
 /*      cheri_prelude_64.sail   is used when xlen == 32   (cap = 64 bits)                */
 /*      cheri_prelude_128.sail  is used when xlen == 64   (cap = 128 bits)               */
 /*      cheri_prelude_xlen.sail picks between them on `if xlen == 32`.                   */
-/*  TruISA keeps the cap at 64 bits on both XLENs, so the file that corresponds to THIS  */
-/*  one, line for line, is **cheri_prelude_128.sail**, not cheri_prelude_64.sail.         */
-/*  Reading it side by side with cheri_prelude_64.sail would compare RV32 against RV64.   */
+/*  TruISA keeps the cap at 64 bits on RV64, so the file that corresponds to THIS one,    */
+/*  line for line, is **cheri_prelude_128.sail**, not cheri_prelude_64.sail.              */
 /*                                                                                       */
 /*  Everything else in the blueprint's 127 lines -- the compressed-format widths           */
 /*  (mantissa, exponent, software-defined permissions, reserved fields), the EncMetadata  */
 /*  bitfield and the ap_m_encdec table -- is dropped: TruISA has no compression layer     */
 /*  (bounds are computed by the DGU from (C, S), ADR-0001 / ADR-0004) and no permission   */
-/*  bits (ADR-0011). One constant out of 127 lines is the expected outcome, not an        */
-/*  omission.                                                                            */
+/*  bits (ADR-0011).                                                                      */
+/*                                                                                       */
+/*  D-92 ruling: see truisa_prelude_32.sail for the RV32 counterpart.                     */
 /*=======================================================================================*/
 
-/* Width of the capability in bytes, as log2. 3 means 2^3 = 8 bytes = 64 bits.
- *
- * This is the ONLY thing that varies between the 32- and 64-bit capability formats, and
- * it depends on the CAPABILITY width (chosen here as 64 bits for every XLEN), not on the
- * address width. TruISA narrows the *address field* by profile (39/48/57, ADR-0003);
- * it does not narrow the pointer. Do not confuse the two: truisa_address_width lives in
- * truisa_cap_common.sail and is a different quantity.
- *
- * D-92 ruling: see truisa_prelude_32.sail for the RV32 counterpart. */
+/* ---- The per-XLEN values. Everything else is derived in truisa_prelude_xlen.sail. ---- */
+
+// N/C width: log2 of the pointer width. Spelled as a literal, not as log2(ptr_width),
+// because Sail folds 2^ but not log2. (The blueprint hard-codes 6, unexplained.)
+type truisa_nc_width_64 : Int = 6
+let  truisa_nc_width_64 = sizeof(truisa_nc_width_64)
+
+// Address field: 48 is the ONLY profile the specification defines (ADR-0032 decision 1:
+// single configuration; the old Sv39/Sv48/Sv57 split and PAC_W = 57 - VA are withdrawn).
+type truisa_address_width_64 : Int = 48
+let  truisa_address_width_64 = sizeof(truisa_address_width_64)
+
+// Capability in bytes: 8, i.e. 64 bits.  ⛔ Not `2 ^ log2_cap_size` -- that route reaches
+// a config variable and cannot be folded (D-94/D-96).
+type cap_size_64 : Int = 8
+let  cap_size_64 = sizeof(cap_size_64)
+
+// Width of the capability in bytes, as log2. 3 means 2^3 = 8 bytes = 64 bits.
 type log2_cap_size_64 : Int = 3
 let  log2_cap_size_64 = sizeof(log2_cap_size_64)

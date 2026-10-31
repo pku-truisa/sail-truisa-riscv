@@ -9,51 +9,15 @@
 /*  TruISA has no metadata and no in-pointer bounds.                                       */
 /*=======================================================================================*/
 
-// truisa_ptr_width IS xlen -- the blueprint's shape (cheri_cap_common.sail:14).
-type truisa_ptr_width : Int = xlen
-let  truisa_ptr_width = sizeof(truisa_ptr_width)
+// Every truisa_* width is defined in the prelude trio, NOT here:
+//   truisa_prelude_64.sail / _32.sail  the per-XLEN literals (nc, address, cap_size)
+//   truisa_prelude_xlen.sail           picks between them and derives the rest
+// => this file contains no `if xlen == 32`, and must never grow one. If a value needs to
+// differ per XLEN, it belongs in the candidates and gets chosen in prelude_xlen.
 
-// Tag bits: one mode bit plus log2(xlen) bits of N/C.
-type truisa_mode_width : Int = 1
-let  truisa_mode_width = sizeof(truisa_mode_width)
-
-// log2 of the pointer width.
-type truisa_nc_width : Int = if xlen == 32 then 5 else 6
-let  truisa_nc_width = sizeof(truisa_nc_width)
-
-type truisa_tag_width : Int = truisa_mode_width + truisa_nc_width
-let  truisa_tag_width = sizeof(truisa_tag_width)
-
-// 64 -> 48, the only profile in the spec (ADR-0032 d1); 32 -> 24, filling the pointer.
-// Notes: The XLEN 32 branch is a MODEL CAPABILITY, not a spec commitment (ADR-0032 d3).
-type truisa_address_width : Int = if xlen == 32 then 24 else 48
-let  truisa_address_width = sizeof(truisa_address_width)
-
-// PAC bits: all bits between the tag and the address.
-type truisa_pac_width : Int =
-  truisa_ptr_width - truisa_address_width - truisa_mode_width - truisa_nc_width
-let  truisa_pac_width = sizeof(truisa_pac_width)
-
-
-// The struct's `address` is a full machine word, so it exceeds CapBits (ADR-0029 d1).
-// Notes: Never restate truisa_pac_width via truisa_meta_width -- the second is derived.
-// why: doc/truisa-deltas.md#repr
-
-// Lets Sail prove `bits(truisa_ptr_width - truisa_address_width)` non-negative.
-constraint truisa_address_width <= truisa_ptr_width
-
-type truisa_meta_width : Int = truisa_ptr_width - truisa_address_width
-let  truisa_meta_width = sizeof(truisa_meta_width)
-
-/* Bookkeeping only: 80/40. Notes: Never used inside bits() -- CapBits stays bits(64/32). */
-type truisa_cap_repr_width : Int = truisa_ptr_width + truisa_meta_width
-let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
-
-// Residue of the entry layout, not an input to it (D-223). Notes: NOT meta_width * 2.
-// why: doc/truisa-deltas.md#saltwidth
-type truisa_salt_width : Int = 2 * (xlen - truisa_address_width)
-let  truisa_salt_width = sizeof(truisa_salt_width)
-
+// The poison tag: mode = 0, N/C = all ones. Written symbolically because that literal is
+// 7 bits only at XLEN 64 -- Sail will not reduce `1 + (if xlen == 32 then 5 else 6)` to a
+// number it can compare against.
 let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
 
 /*=======================================================================================*/
@@ -64,10 +28,6 @@ let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
 
 // Alias layer: `Cap*` keeps the blueprint's spelling so the two files read side by side.
 // Each is defined from a `truisa_*` width above; none carries a constant of its own.
-
-// Capability size in bytes. Notes: do not use `2 ^ log2_cap_size`, which cannot be folded (D-94).
-type cap_size : Int = if xlen == 32 then 4 else 8
-let  cap_size = sizeof(cap_size)
 
 type CapBits     = bits(8 * cap_size)
 type CapAddrBits = bits(truisa_address_width)
@@ -203,15 +163,11 @@ function poisonIf(cap : Capability, cond : bool) -> Capability =
 // PAC_W is, because that is protocol, not algorithm.
 // ----------------------------------------------------------------------------------------
 
-// 1b-3. truisaMac -- the width-aware wrapper the architecture fixes. spec/ch04 line 313: the
-// input is tag || CentroID || salt, a FIXED-length concatenation, so no two distinct inputs
-// share a shape. Spelled as a sum, never as 87 -- that number is only right at XLEN 64.
-// The result is truncated to PAC_W here, which is the only place the algorithm's 128-bit
-// output meets the profile's width.
+// 1b-3. truisaMac -- the width-aware wrapper the architecture fixes. truisa_mac_msg_width
+// (tag || CentroID || salt, a FIXED-length concatenation) is defined in prelude_xlen with
+// the other derived widths. The result is truncated to PAC_W here, which is the only place
+// the algorithm's 128-bit output meets the profile's width.
 // why: doc/truisa-deltas.md#mac
-type truisa_mac_msg_width : Int =
-  truisa_mode_width + truisa_nc_width + truisa_address_width + truisa_salt_width
-
 val  truisaMac : (bits(128), bits(truisa_mac_msg_width)) -> bits(truisa_pac_width)
 function truisaMac(key : bits(128), msg : bits(truisa_mac_msg_width)) -> bits(truisa_pac_width) =
   truncate(truisa_mac_raw(key, zero_extend(msg), truisa_pac_width), truisa_pac_width)

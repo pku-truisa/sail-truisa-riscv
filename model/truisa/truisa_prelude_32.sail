@@ -1,5 +1,5 @@
 /*=======================================================================================*/
-/*  TruISA: the 32-bit capability width, for RV32.                                      */
+/*  TruISA: the 32-bit capability format, for RV32.                                     */
 /*                                                                                       */
 /*  Same role as truisa_prelude_64.sail, one step narrower. The blueprint counterpart is  */
 /*  cheri_prelude_64.sail -- and, as noted there, the CHERI names are misleading: in      */
@@ -7,24 +7,28 @@
 /*  `_32` (cap = 32 bits) has no CHERI equivalent at all, because CHERI never narrows the  */
 /*  capability below 64 bits. It is the RV32 half of TruISA's own two-way split.          */
 /*                                                                                       */
-/*  ⚠️ This file is NOT a placeholder. cap_size depends only on the capability width,     */
-/*  which is 32 bits here, so the value is determined: 4 bytes. Writing it is answering   */
-/*  the question, not papering over it (contrast D-69 §5: a stub that merely satisfies    */
-/*  the type checker would be different).                                                 */
+/*  ⚠️ This branch is a MODEL CAPABILITY, not a spec commitment: it is deliberately        */
+/*  absent from docs/isa and spec/ (ADR-0032 decision 3). Do not cite it as normative,    */
+/*  and do not add a spec sentence for it.                                                */
 /*                                                                                       */
-/*  ⚠️⚠️ Having this file does NOT make RV32 build. It only supplies the capability       */
-/*  width. Three things still block RV32, and none of them is a matter of adding files:   */
-/*    - ADR-0003's three VA profiles are 39 / 48 / 57, all wider than 32;                 */
-/*    - the pointer's bit fields (mode + N/C truisa_nc_width + PAC                       */
-/*      truisa_pac_width) leave nothing for a 48-bit address;                            */
-/*    - truisa_pac_width = truisa_ptr_width - 48 - 1 - truisa_nc_width = -22 here, so    */
-/*      bits(truisa_pac_width) cannot be formed.                                         */
-/*  Do NOT add `constraint xlen == 64` to silence this: that would lock out the very      */
-/*  direction this file exists for. Do NOT temporarily shrink truisa_address_width to     */
-/*  make RV32 compile either -- the VA profile is a spec decision (ADR-0003), not a       */
-/*  convenience.                                                                          */
+/*  The three values below are what makes mode + N/C + PAC + address fill the 32-bit      */
+/*  pointer exactly: 1 + 5 + 2 + 24 = 32, so PAC_W = 2 falls out of the arithmetic.       */
 /*=======================================================================================*/
 
-/* Width of the capability in bytes, as log2. 2 means 2^2 = 4 bytes = 32 bits. */
+/* ---- The per-XLEN values. Everything else is derived in truisa_prelude_xlen.sail. ---- */
+
+// N/C width: log2 of the pointer width, i.e. log2(32) = 5.
+type truisa_nc_width_32 : Int = 5
+let  truisa_nc_width_32 = sizeof(truisa_nc_width_32)
+
+// Address field: 24, chosen so the fields fill the pointer with nothing left over.
+type truisa_address_width_32 : Int = 24
+let  truisa_address_width_32 = sizeof(truisa_address_width_32)
+
+// Capability in bytes: 4, i.e. 32 bits.  ⛔ Not `2 ^ log2_cap_size` (D-94/D-96).
+type cap_size_32 : Int = 4
+let  cap_size_32 = sizeof(cap_size_32)
+
+// Width of the capability in bytes, as log2. 2 means 2^2 = 4 bytes = 32 bits.
 type log2_cap_size_32 : Int = 2
 let  log2_cap_size_32 = sizeof(log2_cap_size_32)
