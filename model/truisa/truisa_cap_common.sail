@@ -301,14 +301,24 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 // three forms as ONE formula, SlotBase(addr, K); the body does NOT fold bare into it,
 // deliberately. Notes: None() has three sources and they are NOT the same thing (gcbase.adoc).
 // why: doc/truisa-deltas.md#gcbase
-val  getCapBoundsBits : Capability -> option((CapAddrBits, CapAddrBits))
-function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)) = {
+// Returns the bounds ALREADY SIGN-EXTENDED to the register width, so that every caller
+// (GCBASE / GCBOUND) can write the value straight to X(rd) without repeating the rule.
+// The rule is gcbound.adoc: "sign extended by bit (VA-1)", i.e. bits 63-48 copy bit (VA-1).
+// Bare is the case that makes this visible: its bound is 2^VA - 1, which sign-extends to
+// 0xFFFF_FFFF_FFFF_FFFF = -1 -- that is what the spec says, not an accident.
+// Notes: the blueprint's getCapBoundsBits returns the FIELD widths (CapAddrBits, CapLenBits)
+// and leaves the extension to each caller; there is no GCBase/GCBound there to compare
+// against, so this is a TruISA choice, not a divergence from a blueprint body.
+val  getCapBoundsBits : Capability -> option((bits(cap_ptr_width), bits(cap_ptr_width)))
+function getCapBoundsBits(cap : Capability) -> option((bits(cap_ptr_width), bits(cap_ptr_width))) = {
   let form = getCapForm(cap);
   if form == FormPoisoned | form == FormInvalid | form == FormDescriptor then None()
-  else if form == FormBare then
+  else if form == FormBare then {
     /* Whole address space: first byte 0, last byte 2^VA - 1. */
-    Some((zeros(), ones()))
-  else {
+    let lo : CapAddrBits = zeros();
+    let hi : CapAddrBits = ones();
+    Some((sign_extend(lo), sign_extend(hi)))
+  } else {
     /* Aligned: [S, S + 2^N - 1]. S is already N-aligned, so the addition cannot leave
      * the field. N = VA is legal (ADR-0026) and lands on the same all-ones value. */
     let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
@@ -316,7 +326,7 @@ function getCapBoundsBits(cap : Capability) -> option((CapAddrBits, CapAddrBits)
     let base : CapAddrBits = getCapSlotBase(a, cap.nc);
     let span64 : bits(64) = ((0x0000_0000_0000_0001 : bits(64)) << k) - 1;
     let span : CapAddrBits = truncate(span64, cap_address_width);
-    Some((base, base + span))
+    Some((sign_extend(base), sign_extend(base + span)))
   }
 }
 

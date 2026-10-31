@@ -20,15 +20,15 @@ union clause instruction = GCADDR : (regidx, regidx)
  *
  * gcbase rd, cs1
  *
- * Decode the slot base from cs1 and write it to rd, sign-extended from
- * 48 bits (the address field) to XLEN. A poisoned pointer yields 0.
+ * Decode the slot base from cs1 and write it to rd. getCapBoundsBits already
+ * sign-extends from the address field to XLEN. A poisoned pointer yields 0.
  */
 
 function clause execute (GCBASE(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(base, _) => sign_extend(base)
+    Some(base, _) => base
   };
   RETIRE_SUCCESS
 }
@@ -39,16 +39,15 @@ function clause execute (GCBASE(rd, cs1)) = {
  *
  * gcbound rd, cs1
  *
- * Decode the slot bound (closed interval, last byte) from cs1 and write it
- * to rd, sign-extended from 48 bits (the address field) to XLEN. A poisoned
- * pointer yields 0.
+ * Decode the slot bound (closed interval, last byte) from cs1 and write it to rd.
+ * getCapBoundsBits already sign-extends. A poisoned pointer yields 0.
  */
 
 function clause execute (GCBOUND(rd, cs1)) = {
   let capVal = C(cs1);
   X(rd) = match getCapBoundsBits(capVal) {
     None() => zeros(),
-    Some(_, bound) => sign_extend(bound)
+    Some(_, bound) => bound
   };
   RETIRE_SUCCESS
 }
