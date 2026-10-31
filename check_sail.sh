@@ -105,8 +105,32 @@ run_rv64() {
 }
 
 run_rv32() {
-  # The CMake target cannot pass --config, so take its Sail invocation apart and add it.
-  # That recipe is the only place that already lists all 144 sources in the right order.
+  # ⚠️⚠️ `--config config/rv32d.json` does NOT change xlen during TYPE CHECKING -- it only
+  # affects the constants in the code that gets generated. Measured 2026-10-31:
+  #   --config rv32d.json  -> 102 warnings,  37 s  (identical to RV64 => the RV32 arm was
+  #                                                never type-checked; that is a FALSE PASS)
+  #   xlen hardcoded to 32 -> 186 warnings, 357 s  (this is the real RV32 check)
+  # So the only honest way is to patch xlen in the WSL COPY (never the Windows source,
+  # never a git-tracked file in the workspace) and restore it afterwards.
+  cp model/riscv_xlen.sail /tmp/xlen.bak || return 1
+  sed -i 's|^type xlen : Int = config base.xlen|type xlen : Int = 32|' model/riscv_xlen.sail
+  if ! grep -q '^type xlen : Int = 32' model/riscv_xlen.sail; then
+    cp /tmp/xlen.bak model/riscv_xlen.sail
+    echo "check_sail[rv32]: could not patch xlen (riscv_xlen.sail layout changed?)" >&2
+    return 1
+  fi
+  local t0 t1 rc
+  t0=$(date +%s)
+  make -C build generated_sail_riscv_model > /tmp/sailcheck-rv32.log 2>&1; rc=$?
+  t1=$(date +%s)
+  # Restore unconditionally, then touch so the next RV64 run cannot reuse RV32's model.c.
+  cp /tmp/xlen.bak model/riscv_xlen.sail
+  touch model/riscv_xlen.sail
+  report rv32 "$rc" "$((t1-t0))" /tmp/sailcheck-rv32.log
+}
+
+run_rv32_old_cfg_unused() {
+  # Kept only as a record of the approach that does NOT work (see run_rv32).
   python3 - "$T" <<'PY' || return 1
 import sys
 T = sys.argv[1]
@@ -121,11 +145,6 @@ for line in open(p, encoding='utf-8', errors='replace'):
         sys.exit(0)
 sys.exit('sail recipe not found in ' + p)
 PY
-  local t0 t1 rc
-  t0=$(date +%s)
-  bash /tmp/rv32cmd.sh > /tmp/sailcheck-rv32.log 2>&1; rc=$?
-  t1=$(date +%s)
-  report rv32 "$rc" "$((t1-t0))" /tmp/sailcheck-rv32.log
 }
 
 fail=0

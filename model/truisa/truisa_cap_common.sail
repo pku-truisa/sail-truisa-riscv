@@ -26,9 +26,14 @@ let  truisa_mode_width = sizeof(truisa_mode_width)
 type truisa_nc_width : Int = if xlen == 32 then 5 else 6
 let  truisa_nc_width = sizeof(truisa_nc_width)
 
-/* Target constant 2: the address field width, set by the VA profile (ADR-0003).
- *   XLEN 64 -> Sv48, 48 bits.
+/* Target constant 2: the address field width.
+ *   XLEN 64 -> 48 bits. This is the ONLY profile the specification defines (ADR-0032
+ *              decision 1: single configuration; the old Sv39/Sv48/Sv57 three-tier split
+ *              and PAC_W = 57 - VA are both withdrawn).
  *   XLEN 32 -> 24 bits, so that mode + N/C + PAC + address fill the 32-bit pointer exactly.
+ * ⚠️ The XLEN 32 branch is a MODEL CAPABILITY, not a spec commitment: it is deliberately
+ *    absent from docs/isa and spec/ (ADR-0032 decision 3). Do not cite it as normative,
+ *    and do not add a spec sentence for it.
  * Both branches are live: everything downstream consumes this through bits(...), so the
  * expression has to stay evaluable -- see the note above truisa_mac_msg_width. */
 type truisa_address_width : Int = if xlen == 32 then 24 else 48
