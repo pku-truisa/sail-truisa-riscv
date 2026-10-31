@@ -191,6 +191,36 @@
  * ---------------------------------------------------------------------------------- */
 ```
 
+## saltwidth
+
+搬自 `truisa_salt_width` 上方（2026-10-31 第二轮注释瘦身）。源码现在只留一行推导式 + 本锚。
+
+```text
+// Salt width: 32 bits at XLEN 64 (spec/ch04 line 183), 16 at XLEN 32.
+// DERIVED, not enumerated (D-223 ruling 1): a descriptor half-word is `xlen` wide, its
+// valid field is truisa_address_width bits, so the remaining bits of the two half-words are
+// exactly 2 * (xlen - address_width). 64 -> 32, 32 -> 16. The salt is the RESIDUE of the
+// entry layout, not an input to it.
+// The XLEN 32 value is a model capability, not a spec commitment (ADR-0032 decision 3).
+// It is an Int (not a `type = if ... then bits(..)`) because truisa_mac_msg_width has to
+// consume the number, and a conditional type cannot be asked for its width.
+```
+
+> ⛔ **不要写成 `truisa_meta_width * 2`**，虽然它现在恰好给出同样的两个数。
+>
+> 两个等式在当前两个 profile 下数值相同，但**因果不同**：`ADR-0008` 决策 4 说「每个 64 位半字中，
+> 字段占低 48 位，高 16 位为保留段」⇒ 半字宽度由 `xlen` 定，`salt` 是**余位的产物**。
+>
+> 若按 `2 × meta` 写，在 `ADR-0003` 的另两档上会静默崩掉：
+>
+> | 配置 | `meta = ptr − VA` | `2 × meta` | |
+> |---|---|---|---|
+> | Sv39 | 25 | **50 位** | ⛔ 超出 `{127–112, 63–48}` 的 32 位载体 |
+> | Sv57 | 7 | **14 位** | ⚠️ salt 空间只剩 16384 |
+>
+> ⚠️ 而 Sail 对两者都不吭声：`bits(50)` 是完全合法的类型，模型里没有任何东西知道载体能装多少
+> ⇒ 失败形态是**模型与规范静默脱节**，不是编译错误。
+
 ## setbnds
 
 ```text

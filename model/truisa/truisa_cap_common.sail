@@ -9,9 +9,7 @@
 /*  TruISA has no metadata and no in-pointer bounds.                                       */
 /*=======================================================================================*/
 
-// Width block. truisa_ptr_width IS xlen -- the blueprint's shape
-// (cheri_cap_common.sail:14 `type cap_addr_width : Int = xlen`), so there is no duplicate
-// constant and nothing to keep in sync.
+// truisa_ptr_width IS xlen -- the blueprint's shape (cheri_cap_common.sail:14).
 type truisa_ptr_width : Int = xlen
 let  truisa_ptr_width = sizeof(truisa_ptr_width)
 
@@ -19,41 +17,26 @@ let  truisa_ptr_width = sizeof(truisa_ptr_width)
 type truisa_mode_width : Int = 1
 let  truisa_mode_width = sizeof(truisa_mode_width)
 
-/* N/C must be able to name any bit position of the pointer, so its width is log2 of the
- * pointer width: 6 at XLEN 64, 5 at 32. Spelled as a conditional rather than
- * log2(truisa_ptr_width) because Sail folds 2^ but not log2.
- * TRUISA DELTA: the blueprint hard-codes 6 with no explanation of where it comes from. */
+// log2 of the pointer width; spelled out because Sail folds 2^ but not log2.
 type truisa_nc_width : Int = if xlen == 32 then 5 else 6
 let  truisa_nc_width = sizeof(truisa_nc_width)
 
-/* Target constant 2: the address field width.
- *   XLEN 64 -> 48 bits. This is the ONLY profile the specification defines (ADR-0032
- *              decision 1: single configuration; the old Sv39/Sv48/Sv57 three-tier split
- *              and PAC_W = 57 - VA are both withdrawn).
- *   XLEN 32 -> 24 bits, so that mode + N/C + PAC + address fill the 32-bit pointer exactly.
- * ⚠️ The XLEN 32 branch is a MODEL CAPABILITY, not a spec commitment: it is deliberately
- *    absent from docs/isa and spec/ (ADR-0032 decision 3). Do not cite it as normative,
- *    and do not add a spec sentence for it.
- * Both branches are live: everything downstream consumes this through bits(...), so the
- * expression has to stay evaluable -- see the note above truisa_mac_msg_width. */
+// 64 -> 48, the only profile in the spec (ADR-0032 d1); 32 -> 24, filling the pointer.
+// ⛔ The XLEN 32 branch is a MODEL CAPABILITY, not a spec commitment (ADR-0032 d3).
 type truisa_address_width : Int = if xlen == 32 then 24 else 48
 let  truisa_address_width = sizeof(truisa_address_width)
 
-/* Everything left between the label and the address:
- * truisa_ptr_width - truisa_address_width - truisa_mode_width - truisa_nc_width. */
+// Everything between the label and the address.
 type truisa_pac_width : Int =
   truisa_ptr_width - truisa_address_width - truisa_mode_width - truisa_nc_width
 let  truisa_pac_width = sizeof(truisa_pac_width)
 
 
-// The REGISTER representation is wider than the memory encoding (ADR-0029 decision 1):
-// `address` is a full machine word, so the struct exceeds CapBits.
-// ⛔ Never restate truisa_pac_width (:61) in terms of truisa_meta_width -- they are
-// different quantities, and the second is derived from the first.
+// The struct's `address` is a full machine word, so it exceeds CapBits (ADR-0029 d1).
+// ⛔ Never restate truisa_pac_width via truisa_meta_width -- the second is derived.
 // why: doc/truisa-deltas.md#repr
-// The VA profile must fit inside the pointer. This is the constraint that lets Sail prove
-// `bits(truisa_ptr_width - truisa_address_width)` is well-formed: the subtraction itself is
-// fine, it is the non-negativity proof that a config variable cannot supply on its own.
+
+// Lets Sail prove `bits(truisa_ptr_width - truisa_address_width)` non-negative.
 constraint truisa_address_width <= truisa_ptr_width
 
 type truisa_meta_width : Int = truisa_ptr_width - truisa_address_width
@@ -63,24 +46,8 @@ let  truisa_meta_width = sizeof(truisa_meta_width)
 type truisa_cap_repr_width : Int = truisa_ptr_width + truisa_meta_width
 let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
 
-// Salt width: 32 bits at XLEN 64 (spec/ch04 line 183), 16 at XLEN 32.
-// ⭐ DERIVED, not enumerated (D-223 ruling 1): a descriptor half-word is `xlen` wide, its
-// valid field is truisa_address_width bits, so the remaining bits of the two half-words are
-// exactly 2 * (xlen - address_width). 64 -> 32, 32 -> 16. The salt is the RESIDUE of the
-// entry layout, not an input to it -- do not write it as `if xlen == 32 then 16 else 32`.
-// ⚠️ The XLEN 32 value is a model capability, not a spec commitment (ADR-0032 decision 3).
-// It is an Int (not a `type = if ... then bits(..)`) because truisa_mac_msg_width has to
-// consume the number, and a conditional type cannot be asked for its width.
-//
-// ⛔ NOT `truisa_meta_width * 2`, tempting as that is. It happens to give 32 and 16 at the
-// two profiles in use, but the salt width is fixed by its CARRIER, not by the layout:
-// ADR-0005 rev 8 carries it in {bits 127-112, bits 63-48} -- 32 bits, no more. Written as
-// a function of the layout it silently collapses at the other ADR-0003 profiles:
-//   Sv39 -> meta = 64-39 = 25 -> salt = 50 bits, which does not fit the carrier;
-//   Sv57 -> meta = 64-57 =  7 -> salt = 14 bits, i.e. a 16384-value salt space.
-// ⚠️ Sail will not complain about either: bits(50) is a perfectly well-formed type, and
-// nothing in the model knows what the carrier can hold. The failure is silent and shows up
-// as a spec/model divergence, not as a build error.
+// Residue of the entry layout, not an input to it (D-223). ⛔ NOT meta_width * 2.
+// why: doc/truisa-deltas.md#saltwidth
 type truisa_salt_width : Int = 2 * (xlen - truisa_address_width)
 let  truisa_salt_width = sizeof(truisa_salt_width)
 
@@ -95,16 +62,10 @@ let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
 /*  CR-MAC-01 Rev.1 items 1a-1 .. 1a-8. No MAC, no signing, no table: 1b owns those.      */
 /*=======================================================================================*/
 
-// ---------------------------------------------------------------------------------
-// Alias layer. `Cap*` keeps the blueprint's spelling (cheri_cap_common.sail:26/29) so the
-// two files read side by side; it exists ONLY so the blueprint's operator bodies can be
-// reused verbatim. Every one is defined from a `truisa_*` width above -- none carries a
-// constant of its own. Read the `truisa_*` block first.
-// ---------------------------------------------------------------------------------
+// Alias layer: `Cap*` keeps the blueprint's spelling so the two files read side by side.
+// Each is defined from a `truisa_*` width above; none carries a constant of its own.
 
-// Size of the capability in bytes: 8 at XLEN 64, 4 at 32. Spelled as a conditional, not as
-// `2 ^ log2_cap_size` -- that route reaches the config variable and cannot be folded
-// (D-94/D-96). ⛔ No second constant alongside this expression.
+// Capability size in bytes. ⛔ Not `2 ^ log2_cap_size` -- that cannot be folded (D-94).
 type cap_size : Int = if xlen == 32 then 4 else 8
 let  cap_size = sizeof(cap_size)
 
@@ -112,30 +73,19 @@ type CapBits     = bits(8 * cap_size)
 type CapAddrBits = bits(truisa_address_width)
 type CapTagBits  = bits(truisa_tag_width)
 
-// The poison tag: mode = 0, N/C = all ones. Written symbolically, not as `0b0111111`:
-// that literal is 7 bits only at XLEN 64 -- at XLEN 32 the tag is one bit shorter, and
-// Sail will not reduce `1 + (if xlen == 32 then 5 else 6)` to a number it can compare a
-// literal against. docs/isa/03 section 3.6 spells the code in 7-bit form for the same
-// reason it is written here: 64-bit is the case that document works in.
 type CapMetaBits = bits(truisa_meta_width)
 
-// The PAC slice, written VA + PAC_W - 1 .. VA -- never as literal bit numbers, because the
-// slice moves with the VA profile (ADR-0003).
+// VA + PAC_W - 1 .. VA -- never literal bit numbers, the slice moves with the profile.
 type CapPacBits  = bits(truisa_pac_width)
 
-/* salt: 32 bits at XLEN 64, 16 at XLEN 32 (the latter is NOT in spec/ch04 -- see
- * truisa_salt_width). Descriptor mode reads it from the table entry;
- * aligned-slot mode uses all zeros (ADR-0005 rev 11 item 3). ⚠️ The segment is NOT
- * omitted in the aligned case even though it is zero -- omitting it would change the
- * 87-bit length that makes the encoding unambiguous (spec/ch04 line 313). */
+// Entry salt, or all zeros on the aligned path (ADR-0005 rev 11 c3). ⚠️ The zero segment
+// is NOT omitted -- it is what fixes the MAC input length.
 type CapSaltBits = bits(truisa_salt_width)
 
-// 1a-1. The capability has two views, of different width (ADR-0029 decision 1):
+// 1a-1. Two views, different widths (ADR-0029 decision 1):
 //   memory    mode(1) | N/C(6) | PAC(9) | address(48)   <- CapBits; what SCEQ compares
-//   register  mode+NC(7) | PAC(9) | address(64)        <- the struct, truisa_cap_repr_width
-// Register address[63:48] is redundant: dropped on encode, filled by sign extension
-// (invariants I1/I2). Four fields, not CHERI's twelve -- no bounds, no permissions, no
-// seal (ADR-0001, ADR-0011). Widths are named constants, never literals (D-96).
+//   register  mode+NC(7) | PAC(9) | address(64)        <- this struct
+// address[63:48] is redundant (dropped on encode, sign-extended back; I1/I2).
 // why: doc/truisa-deltas.md#layout
 struct Capability = {
   mode    : bits(truisa_mode_width),
@@ -144,15 +94,11 @@ struct Capability = {
   address : bits(truisa_ptr_width),
 }
 
-/* The canonical poison value: tag = 0111111 (mode 0, N/C 63), everything else zero.
- * docs/isa/03 section 3.6: writing this code IS what poisoning means; it is not the
- * CHERI behaviour of clearing a tag bit. */
+// The poison value: mode 0, N/C all ones, rest zero (docs/isa/03 3.6) -- not CHERI's
+// tag-clearing.
 let truisa_poison_cap : Capability = struct {
   mode    = 0b0,
-  /* All-ones N/C, spelled as `ones(...)` and not as a 6-bit literal: the field is
-   * truisa_nc_width wide, which is not 6 at every XLEN. ⚠️ The poison CODE itself
-   * (mode=0, N/C=all-ones) is 7 bits only while the pointer is 64 bits wide -- at XLEN 32
-   * it is one bit shorter, and ADR-0003 defines only the 64-bit spelling. */
+  // `ones(...)` not a 6-bit literal: the field is truisa_nc_width wide, not always 6.
   nc      = ones(truisa_nc_width),
   pac     = zeros(),
   address = zeros(),
