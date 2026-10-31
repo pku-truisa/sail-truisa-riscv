@@ -268,6 +268,14 @@ let truisa_xpkey_stub : bits(128) =
 // Fold `x` by XOR-ing it with itself shifted down by w, k times. Taking the low w bits of
 // the result is exactly "split into w-bit blocks, XOR them, zero-extend the last block":
 // a block shorter than w ends up with zeros above it, which is what zero-extension means.
+//
+// ⚠️ `sail_shiftright` is an INTERNAL symbol of the Sail library (vector.sail:380, the
+// `sail_` prefix marks it). It is used deliberately, not by mistake: the obvious
+// alternative `x >> (i * w)` needs the shift amount to be evaluable, and `slice` cannot
+// help at all because its result length is a TYPE parameter (`'n` in
+// `(bits('m), int('o), int('n)) -> bits('n)`), so it cannot express a variable-width
+// chunk. ⛔ Do not "tidy" this into `x >> (i*w)` without re-running both configurations --
+// whether that form is accepted has never been checked.
 val  foldXorShifted : (bits(128), int, int, bits(128)) -> bits(128)
 function foldXorShifted(x : bits(128), w : int, i : int, acc : bits(128)) -> bits(128) =
   if i * w >= 128 then acc
@@ -280,8 +288,11 @@ function foldXorShifted(x : bits(128), w : int, i : int, acc : bits(128)) -> bit
 // of ADR-0005 decision 10.
 val  foldXor : (bits(128), int) -> bits(truisa_pac_width)
 function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
-  // ⛔ Not `w == 2 | w == 9`: that would re-enumerate PAC_W. PAC_W is 2 or 9 today and the
-  // only value that must never occur is 0 (a zero-width fold is not a function).
+  // ⛔ Not `w == 2 | w == 9`: that would re-enumerate PAC_W. The assertion exists to
+  // REJECT AN UNDEFINED DOMAIN, not to defend against the withdrawn Sv57 profile -- that
+  // profile no longer exists in this architecture, so w = 0 cannot arise from any legal
+  // configuration. It guards against a future mis-configuration, and a zero-width fold is
+  // not a function at all, so failing loudly beats returning a zero-width value.
   assert(w > 0);
   assert(w == truisa_pac_width);
   truncate(foldXorShifted(x, w, 0, zeros()), truisa_pac_width)
