@@ -27,7 +27,14 @@ type truisa_nc_width : Int = if truisa_ptr_width == 64 then 6 else 5
 let  truisa_nc_width = sizeof(truisa_nc_width)
 
 /* Target constant 2: the address field width, set by the VA profile (ADR-0003):
- * Sv39 -> 39, Sv48 -> 48, Sv57 -> 57. Change this ONE line to switch profile. */
+ * Sv39 -> 39, Sv48 -> 48, Sv57 -> 57. Change this ONE line to switch profile.
+ *
+ * ⛔ NOT yet `if truisa_ptr_width == 64 then 48 else 24`. The XLEN-32 value matters --
+ * at 32 bits, mode + N/C + PAC + address must fill the pointer exactly, which pins
+ * address to 24 -- but switching to the conditional TODAY breaks three things that are
+ * still written in 7-bit terms: the poison tag (0b0111111), the `hi7` prefix of the MAC
+ * input, and the "fixed 87-bit" concatenation. ADR-0003 defines only the 64-bit shapes.
+ * Reported; waiting on a ruling before parametrising. */
 type truisa_address_width : Int = 48
 let  truisa_address_width = sizeof(truisa_address_width)
 
@@ -108,7 +115,11 @@ struct Capability = {
  * CHERI behaviour of clearing a tag bit. */
 let truisa_poison_cap : Capability = struct {
   mode    = 0b0,
-  nc      = 0b111111,
+  /* All-ones N/C, spelled as `ones(...)` and not as a 6-bit literal: the field is
+   * truisa_nc_width wide, which is not 6 at every XLEN. ⚠️ The poison CODE itself
+   * (mode=0, N/C=all-ones) is 7 bits only while the pointer is 64 bits wide -- at XLEN 32
+   * it is one bit shorter, and ADR-0003 defines only the 64-bit spelling. */
+  nc      = ones(truisa_nc_width),
   pac     = zeros(),
   address = zeros(),
 }
