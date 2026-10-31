@@ -91,10 +91,6 @@ let truisa_poison_cap : Capability = struct {
 
 // Notes: There is no `capToBits` any more (ADR-0029 decision 3): with `address` at 64 bits the
 // blueprint's own shape applies too (cheri_insts.sail:211). Notes: Do not rescue it.
-val  capToMetadataBits : Capability -> CapMetaBits
-function capToMetadataBits(cap : Capability) -> CapMetaBits =
-  cap.mode @ cap.nc @ cap.pac
-
 // encode . decode = id, ONLY on canonical capabilities (ADR-0029 invariant I1): a bare
 // integer written by wX is not canonical and does not round-trip. Notes: Never rename this to
 // `_tag` -- TruISA has no tag bit (ADR-0003 decision 4).
@@ -111,6 +107,10 @@ function bitsToCap(tag : bool, ptr : CapBits) -> Capability =
      * RISC-V canonical address form (ADR-0029 decision 5). */
     address = sign_extend(ptr[cap_address_width - 1 .. 0]),
   }
+
+val  capToMetadataBits : Capability -> CapMetaBits
+function capToMetadataBits(cap : Capability) -> CapMetaBits =
+  cap.mode @ cap.nc @ cap.pac
 
 /* ------------------------------------------------------------------------------------
  * 1a-4. The 7-bit label (bits 63-57): mode plus N/C. Every form decision hangs off it.
@@ -354,44 +354,13 @@ function carryOutOfAddrField(a : CapAddrBits, delta : xlenbits) -> bool = {
   & (sum[cap_ptr_width - 1 .. cap_address_width] != zeros())
 }
 
-// 1c-2. The checked pointer increment used by CADD / CADDI.
-// Arithmetic + delegate: criteria (1) and (2) are applied by setCapAddrChecked, (3) here.
-// `delta` is XLEN bits, NOT VA bits (ADR-0029 decision 10.1). `pac` is copied because the
-// MAC covers the slot, not the address (ADR-0004). (3) is a FIELD test -- never
-// `sign_extend(new) == sum`, which is identically false for the whole upper half. Downward
-// overflow is ALLOWED (mod 2^VA). why: doc/truisa-deltas.md#incaddr
-/* Warning: Declared ahead of its use, and that is deliberate: incCapAddrChecked delegates to
- * it, and source order is load-bearing WITHIN a file as well as across files
- * (CODE_STYLE rule 7). The definition stays in 1c-3 below -- this `val` is the whole
- * point, so do not "tidy" it away by moving the definition up. */
-val  setCapAddrChecked : (Capability, CapAddrBits) -> Capability
-
-val  incCapAddrChecked : (Capability, xlenbits) -> Capability
-function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
-  let form = getCapForm(cap);
-  let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
-  let sum : bits(cap_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-  // Warning: THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without it
-  // an illegal input that happens to overflow would be poisoned by the outer call even
-  // though criteria (1)/(2) never ran -- FormInvalid laundered into FormPoisoned.
-  let carries : bool =
-    (form != FormPoisoned) & (form != FormInvalid) & carryOutOfAddrField(a, delta);
-  /* Poisoned / invalid inputs come back untouched from setCapAddrChecked's own form
-   * dispatch, and `carries` is false for them, so they are returned exactly as given. */
-  /* Notes: the OUTER poison must pass `cap` too, not the inner result -- the inner call
-   * already returns `addr = new48` on success, so poisoning that value would put the
-   * carried-into-nowhere address into the repair entry point (D-224). Fixing only the
-   * inner one changes nothing here. */
-  poisonIf(if carries then cap else setCapAddrChecked(cap, truncate(sum, cap_address_width)),
-           carries)
-}
-
 // Not "setCapAddr plus a sealed check" -- TruISA has no seal (ADR-0001). Two criteria, in
 // spec order: (1) representable = same slot (bare: the same bit(VA-1) half), (2) intact --
 // SCADDR does have an integrity criterion (ADR-0029 decision 11.5 corrected an earlier
 // reading that dropped it). `pac` is copied: the MAC covers the CentroID, and (1) just
 // proved the slot held. The blueprint's unchecked `setCapAddr` is not defined here -- no
 // caller would exist. why: doc/truisa-deltas.md#scaddr
+val  setCapAddrChecked : (Capability, CapAddrBits) -> Capability
 function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability = {
   let form = getCapForm(cap);
   /* Illegal inputs are copied as they are, never laundered into something usable. This is
@@ -413,4 +382,30 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
      * somebody else's object -- fail-then-repair must not become a privilege escalation. */
     poisonIf(cap, not(sameSlot(a, cap.nc, form, addr)) | not(ptrIntact(cap, form)))
   }
+}
+
+// 1c-2. The checked pointer increment used by CADD / CADDI.
+// Arithmetic + delegate: criteria (1) and (2) are applied by setCapAddrChecked, (3) here.
+// `delta` is XLEN bits, NOT VA bits (ADR-0029 decision 10.1). `pac` is copied because the
+// MAC covers the slot, not the address (ADR-0004). (3) is a FIELD test -- never
+// `sign_extend(new) == sum`, which is identically false for the whole upper half. Downward
+// overflow is ALLOWED (mod 2^VA). why: doc/truisa-deltas.md#incaddr
+val  incCapAddrChecked : (Capability, xlenbits) -> Capability
+function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
+  let form = getCapForm(cap);
+  let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
+  let sum : bits(cap_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
+  // Warning: THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without it
+  // an illegal input that happens to overflow would be poisoned by the outer call even
+  // though criteria (1)/(2) never ran -- FormInvalid laundered into FormPoisoned.
+  let carries : bool =
+    (form != FormPoisoned) & (form != FormInvalid) & carryOutOfAddrField(a, delta);
+  /* Poisoned / invalid inputs come back untouched from setCapAddrChecked's own form
+   * dispatch, and `carries` is false for them, so they are returned exactly as given. */
+  /* Notes: the OUTER poison must pass `cap` too, not the inner result -- the inner call
+   * already returns `addr = new48` on success, so poisoning that value would put the
+   * carried-into-nowhere address into the repair entry point (D-224). Fixing only the
+   * inner one changes nothing here. */
+  poisonIf(if carries then cap else setCapAddrChecked(cap, truncate(sum, cap_address_width)),
+           carries)
 }
