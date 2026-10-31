@@ -408,9 +408,9 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
   let form = getCapForm(cap);
   let a : CapAddrBits = cap.address[truisa_address_width - 1 .. 0];
   let sum : bits(truisa_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-// ⚠️ THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without it an
-// illegal input that happens to overflow would be poisoned by the outer call even though
-// criteria (1)/(2) never ran -- FormInvalid laundered into FormPoisoned.
+  // ⚠️ THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without it
+  // an illegal input that happens to overflow would be poisoned by the outer call even
+  // though criteria (1)/(2) never ran -- FormInvalid laundered into FormPoisoned.
   let carries : bool =
     (form != FormPoisoned) & (form != FormInvalid) & carryOutOfAddrField(a, delta);
   /* Poisoned / invalid inputs come back untouched from setCapAddrChecked's own form
