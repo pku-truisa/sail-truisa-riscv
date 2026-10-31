@@ -232,6 +232,24 @@ point neither model can be checked on its own.
    `-22`. None of the three could ever fail a build. Same lesson as the one behind
    "writing the term count into a docstring guarantees the docstring will expire".
 
+11. **Long-form reasoning lives in `doc/`, not in the source.** A comment inside
+   `model/truisa/*.sail` is at most a few lines: what the block does, plus the one
+   constraint the obvious rewrite would violate. The *why* -- counter-examples, failure
+   modes, cross-ADR chains -- belongs in `doc/truisa-deltas.md` under an anchor, and the
+   source keeps `why: doc/truisa-deltas.md#<anchor>`.
+
+   | Where | What | Shape |
+   |---|---|---|
+   | `.sail` | the fact, next to the code | short `//`, CHERI's shape |
+   | `doc/truisa-deltas.md` | the full argument | one `## <anchor>` section each |
+
+   ⚠️ **When you change the semantics an anchor governs, change that anchor in the same
+   commit.** A stale anchor is worse than no anchor, because it reads as current.
+   ⚠️ This rule exists because `truisa_cap_common.sail` had grown to 77 comment blocks /
+   542 comment lines -- of which **19 blocks of ≥10 lines carried 72%**. CHERI's longest
+   block is 6 lines. The code was 201 lines and invisible; it is still 201 lines and now
+   readable (comment ratio 75% → 45%, CHERI's is 45%).
+
 ### Identifier naming (TruISA addition)
 
 - **No bare single letters**, unless the letter is a symbol the specification
