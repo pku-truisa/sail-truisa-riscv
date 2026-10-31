@@ -9,16 +9,12 @@
 /*  TruISA has no metadata and no in-pointer bounds.                                       */
 /*=======================================================================================*/
 
-// Every truisa_* width is defined in the prelude trio, NOT here:
-//   truisa_prelude_64.sail / _32.sail  the per-XLEN literals (nc, address, cap_size)
-//   truisa_prelude_xlen.sail           picks between them and derives the rest
-// => this file contains no `if xlen == 32`, and must never grow one. If a value needs to
-// differ per XLEN, it belongs in the candidates and gets chosen in prelude_xlen.
-
-// The poison tag: mode = 0, N/C = all ones. Written symbolically because that literal is
-// 7 bits only at XLEN 64 -- Sail will not reduce `1 + (if xlen == 32 then 5 else 6)` to a
-// number it can compare against.
-let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
+// Widths live in the prelude trio, not here:
+//   truisa_prelude_64.sail / _32.sail   the per-XLEN literals
+//   truisa_prelude_xlen.sail            picks between them, derives the rest, and holds
+//                                       truisa_poison_tag
+// This file contains no `if xlen == 32` and must never grow one. If a value needs to differ
+// per XLEN, add a candidate there and choose it in prelude_xlen.
 
 /*=======================================================================================*/
 /*  1a -- the capability itself, and the operators that only READ it.                     */
@@ -26,8 +22,13 @@ let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
 /*  CR-MAC-01 Rev.1 items 1a-1 .. 1a-8. No MAC, no signing, no table: 1b owns those.      */
 /*=======================================================================================*/
 
-// Alias layer: `Cap*` keeps the blueprint's spelling so the two files read side by side.
-// Each is defined from a `truisa_*` width above; none carries a constant of its own.
+// Alias layer: names keep the blueprint's spelling so the two files read side by side.
+// Every one of them is a RENAME of a prelude width -- none carries a constant of its own,
+// and none knows which XLEN it is running on.
+type cap_size      : Int = truisa_cap_size
+let  cap_size      = sizeof(cap_size)
+type log2_cap_size : Int = truisa_log2_cap_size
+let  log2_cap_size = sizeof(log2_cap_size)
 
 type CapBits     = bits(8 * cap_size)
 type CapAddrBits = bits(truisa_address_width)

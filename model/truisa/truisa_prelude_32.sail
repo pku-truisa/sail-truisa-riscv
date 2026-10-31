@@ -26,9 +26,9 @@ type truisa_address_width_32 : Int = 24
 let  truisa_address_width_32 = sizeof(truisa_address_width_32)
 
 // Capability in bytes: 4, i.e. 32 bits.  ⛔ Not `2 ^ log2_cap_size` (D-94/D-96).
-type cap_size_32 : Int = 4
-let  cap_size_32 = sizeof(cap_size_32)
+type truisa_cap_size_32 : Int = 4
+let  truisa_cap_size_32 = sizeof(truisa_cap_size_32)
 
 // Width of the capability in bytes, as log2. 2 means 2^2 = 4 bytes = 32 bits.
-type log2_cap_size_32 : Int = 2
-let  log2_cap_size_32 = sizeof(log2_cap_size_32)
+type truisa_log2_cap_size_32 : Int = 2
+let  truisa_log2_cap_size_32 = sizeof(truisa_log2_cap_size_32)

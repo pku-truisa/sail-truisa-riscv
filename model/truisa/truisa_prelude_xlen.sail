@@ -17,8 +17,8 @@
  * Which capability format this build uses, in log2 bytes. The candidates live in
  * truisa_prelude_64.sail (3 = 8 bytes) and truisa_prelude_32.sail (2 = 4 bytes).
  * ---------------------------------------------------------------------------------- */
-type log2_cap_size : Int = if xlen == 32 then log2_cap_size_32 else log2_cap_size_64
-let  log2_cap_size = sizeof(log2_cap_size)
+type truisa_log2_cap_size : Int = if xlen == 32 then truisa_log2_cap_size_32 else truisa_log2_cap_size_64
+let  truisa_log2_cap_size = sizeof(truisa_log2_cap_size)
 
 /* ------------------------------------------------------------------------------------
  * Group 2 -- THE TWO-WAY SPLIT. These three are the only per-XLEN values in the model.
@@ -33,8 +33,8 @@ let  truisa_nc_width = sizeof(truisa_nc_width)
 type truisa_address_width : Int = if xlen == 32 then truisa_address_width_32 else truisa_address_width_64
 let  truisa_address_width = sizeof(truisa_address_width)
 
-type cap_size             : Int = if xlen == 32 then cap_size_32             else cap_size_64
-let  cap_size = sizeof(cap_size)
+type truisa_cap_size      : Int = if xlen == 32 then truisa_cap_size_32      else truisa_cap_size_64
+let  truisa_cap_size = sizeof(truisa_cap_size)
 
 /* ------------------------------------------------------------------------------------
  * Group 3 -- DERIVED. No XLEN branch below this line, and none may be added: a derived
@@ -84,6 +84,11 @@ let  truisa_mac_msg_width = sizeof(truisa_mac_msg_width)
 
 // Lets Sail prove `bits(truisa_ptr_width - truisa_address_width)` non-negative.
 constraint truisa_address_width <= truisa_ptr_width
+
+// The poison tag: mode = 0, N/C = all ones. Written symbolically because that literal is
+// 7 bits only at XLEN 64 -- Sail will not reduce `1 + (if xlen == 32 then 5 else 6)` to a
+// number it can compare against.
+let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
 
 /* ------------------------------------------------------------------------------------
  * Deleted from the blueprint (D-94), in blueprint order. None of it is moved elsewhere:

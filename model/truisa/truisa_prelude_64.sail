@@ -32,9 +32,9 @@ let  truisa_address_width_64 = sizeof(truisa_address_width_64)
 
 // Capability in bytes: 8, i.e. 64 bits.  ⛔ Not `2 ^ log2_cap_size` -- that route reaches
 // a config variable and cannot be folded (D-94/D-96).
-type cap_size_64 : Int = 8
-let  cap_size_64 = sizeof(cap_size_64)
+type truisa_cap_size_64 : Int = 8
+let  truisa_cap_size_64 = sizeof(truisa_cap_size_64)
 
 // Width of the capability in bytes, as log2. 3 means 2^3 = 8 bytes = 64 bits.
-type log2_cap_size_64 : Int = 3
-let  log2_cap_size_64 = sizeof(log2_cap_size_64)
+type truisa_log2_cap_size_64 : Int = 3
+let  truisa_log2_cap_size_64 = sizeof(truisa_log2_cap_size_64)
