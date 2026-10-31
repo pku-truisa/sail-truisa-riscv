@@ -5,10 +5,10 @@
 #     bash check_sail.sh            RV64 (default)   ~40 s   Sail stage only, via make
 #     bash check_sail.sh rv32       RV32             ~40 s   Sail stage with config/rv32d.json
 #     bash check_sail.sh both       RV64 then RV32   ~80 s   both must pass
+#     bash build_emulators.sh       full build       ~570 s  only when explicitly asked
 #
 # ⚠️ Times above are for a warm WSL. On a cold one (WSL just restarted, /mnt/d not yet in
 #    cache) the same runs take ~290 s each -- that is the filesystem, not the model.
-#     bash build_emulators.sh       full build       ~570 s  only when explicitly asked
 #
 # Why this exists: the full build is ~570 s and almost all of it is gcc compiling the
 # ~15 MB of generated C. For "does my Sail still type-check" none of that is needed.
