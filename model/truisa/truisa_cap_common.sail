@@ -23,19 +23,15 @@ let  truisa_mode_width = sizeof(truisa_mode_width)
  * pointer width: 6 at XLEN 64, 5 at 32. Spelled as a conditional rather than
  * log2(truisa_ptr_width) because Sail folds 2^ but not log2.
  * TRUISA DELTA: the blueprint hard-codes 6 with no explanation of where it comes from. */
-type truisa_nc_width : Int = if truisa_ptr_width == 64 then 6 else 5
+type truisa_nc_width : Int = if xlen == 32 then 5 else 6
 let  truisa_nc_width = sizeof(truisa_nc_width)
 
-/* Target constant 2: the address field width, set by the VA profile (ADR-0003):
- * Sv39 -> 39, Sv48 -> 48, Sv57 -> 57. Change this ONE line to switch profile.
- *
- * ⛔ NOT yet `if truisa_ptr_width == 64 then 48 else 24`. The XLEN-32 value matters --
- * at 32 bits, mode + N/C + PAC + address must fill the pointer exactly, which pins
- * address to 24 -- but switching to the conditional TODAY breaks three things that are
- * still written in 7-bit terms: the poison tag (0b0111111), the `hi7` prefix of the MAC
- * input, and the "fixed 87-bit" concatenation. ADR-0003 defines only the 64-bit shapes.
- * Reported; waiting on a ruling before parametrising. */
-type truisa_address_width : Int = 48
+/* Target constant 2: the address field width, set by the VA profile (ADR-0003).
+ *   XLEN 64 -> Sv48, 48 bits.
+ *   XLEN 32 -> 24 bits, so that mode + N/C + PAC + address fill the 32-bit pointer exactly.
+ * Both branches are live: everything downstream consumes this through bits(...), so the
+ * expression has to stay evaluable -- see the note above truisa_mac_msg_width. */
+type truisa_address_width : Int = if xlen == 32 then 24 else 48
 let  truisa_address_width = sizeof(truisa_address_width)
 
 /* Everything left between the label and the address:
@@ -78,12 +74,19 @@ let  truisa_cap_repr_width = sizeof(truisa_cap_repr_width)
 // Size of the capability in bytes: 8 at XLEN 64, 4 at 32. Spelled as a conditional, not as
 // `2 ^ log2_cap_size` -- that route reaches the config variable and cannot be folded
 // (D-94/D-96). ⛔ No second constant alongside this expression.
-type cap_size : Int = if truisa_ptr_width == 64 then 8 else 4
+type cap_size : Int = if xlen == 32 then 4 else 8
 let  cap_size = sizeof(cap_size)
 
 type CapBits     = bits(8 * cap_size)
 type CapAddrBits = bits(truisa_address_width)
 type CapTagBits  = bits(truisa_mode_width + truisa_nc_width)
+
+// The poison tag: mode = 0, N/C = all ones. Written symbolically, not as `0b0111111`:
+// that literal is 7 bits only at XLEN 64 -- at XLEN 32 the tag is one bit shorter, and
+// Sail will not reduce `1 + (if xlen == 32 then 5 else 6)` to a number it can compare a
+// literal against. docs/isa/03 section 3.6 spells the code in 7-bit form for the same
+// reason it is written here: 64-bit is the case that document works in.
+let truisa_poison_tag : CapTagBits = 0b0 @ ones()
 type CapMetaBits = bits(truisa_meta_width)
 
 // The PAC slice, written VA + PAC_W - 1 .. VA -- never as literal bit numbers, because the
@@ -169,7 +172,7 @@ function getCapForm(cap : Capability) -> CapPtrForm = {
   let n : int = unsigned(cap.nc);
   if tag == ones() then FormBare
   else if tag == zeros() then FormBare
-  else if tag == 0b0111111 then FormPoisoned
+  else if tag == truisa_poison_tag then FormPoisoned
   else if cap.mode == 0b1 then
     (if n <= truisa_address_width then FormAligned else FormInvalid)
   else
@@ -247,10 +250,17 @@ function foldXor(x : bits(128), w : int) -> bits(truisa_pac_width) = {
 // 1b-3. truisaMac -- the interface the architecture fixes. spec/ch04 line 313: the input is
 // hi7 || m || salt, a FIXED-length concatenation, so no two distinct inputs share a shape.
 // why: doc/truisa-deltas.md#mac
-val  truisaMac : (bits(128), bits(87)) -> bits(truisa_pac_width)
-function truisaMac(key : bits(128), msg : bits(87)) -> bits(truisa_pac_width) =
+// MAC input = tag || CentroID || salt, a FIXED-length concatenation (spec/ch04), so no two
+// distinct inputs share a shape. The length follows the VA profile -- the tag is
+// mode + N/C wide and the address is truisa_address_width -- so it is spelled as a sum and
+// never as the number 87, which is only right at XLEN 64.
+type truisa_mac_msg_width : Int =
+  truisa_mode_width + truisa_nc_width + truisa_address_width + 32
+
+val  truisaMac : (bits(128), bits(truisa_mac_msg_width)) -> bits(truisa_pac_width)
+function truisaMac(key : bits(128), msg : bits(truisa_mac_msg_width)) -> bits(truisa_pac_width) =
   foldXor(key, truisa_pac_width)
-  ^ foldXor((zeros() : bits(41)) @ msg, truisa_pac_width)
+  ^ foldXor(zero_extend(msg), truisa_pac_width)
 
 
 val  getCapPac : Capability -> CapPacBits
@@ -268,7 +278,7 @@ function signPtr(cap : Capability, salt : cap_salt) -> Capability = {
   /* Slices [VA-1..0]: getCapCentroID's first parameter is CapAddrBits (48), not the
    * 64-bit struct field. The redundant high bits are not part of the address. */
   let m   = getCapCentroID(cap.address[truisa_address_width - 1 .. 0], cap.nc);
-  let msg : bits(87) = hi7 @ m @ salt;
+  let msg : bits(truisa_mac_msg_width) = hi7 @ m @ salt;
   struct {
     mode    = cap.mode,
     nc      = cap.nc,

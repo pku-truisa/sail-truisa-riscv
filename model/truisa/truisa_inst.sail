@@ -390,7 +390,7 @@ union clause instruction = LC : (regidx, regidx, bits(12))
  */
 function clause execute (LC(cd, cs1, imm)) = {
   let offset : xlenbits = sign_extend(imm);
-  match vmem_read(cs1, offset, 8, Read(Data), false, false, false) {
+  match vmem_read(cs1, offset, cap_size, Read(Data), false, false, false) {
     Ok(raw) => {
       C(cd) = bitsToCap(false, raw);
       RETIRE_SUCCESS
@@ -422,7 +422,7 @@ union clause instruction = SC : (regidx, regidx, bits(12))
 function clause execute (SC(cs2, cs1, imm)) = {
   let offset : xlenbits = sign_extend(imm);
   let raw : CapBits = capToMetadataBits(C(cs2)) @ C(cs2).address[truisa_address_width - 1 .. 0];
-  match vmem_write(cs1, offset, 8, raw, Write(Data), false, false, false) {
+  match vmem_write(cs1, offset, cap_size, raw, Write(Data), false, false, false) {
     Ok(_) => RETIRE_SUCCESS,
     Err(e) => e,
   }
