@@ -32,8 +32,8 @@ problem (mostly: no emulator built).
 |---|---|---|
 | `container` | L1 only: ELF loads, HTIF prints its address, `tohost` write ends the run by itself | `m2-baseline.md` §4 judgements 2–3 (no signature criterion, `-`) |
 | `u1` | `CADD` +8 inside the slot; tag stays `0x4C`, `pac` unchanged | `m2-baseline.md` §3 |
-| `u2` | `SCADDR` to the slot top then `CADD` past it ⇒ poisoned `0111111`, silent, no trap | `m2-baseline.md` §3 |
-| `u3` | `CADD` on a Bare operand derives across the whole address space | `m2-baseline.md` §3 |
+| `u2` | `SCADDR` to the slot top then `CADD` past it ⇒ **failure exit** at the *input* address `0x8000_0FF8` (no delta), silent, no trap | `m2-baseline.md` §3 (value fixed by `D-311`) |
+| `u3` | `CADD` on an **encoding-unavailable** operand ⇒ failure exit; input deliberately on the `bit 47 = 1` side so the old Bare-era value cannot be produced | `m2-baseline.md` §3 + §3.0 |
 | `u4` | the `pac` invariant across `CADD`: two encodings, same `bits 63..48`, `bits 47..0` +8 | `D-176` §4 (judgement 5) |
 
 ⚠️ `u4` is the only case that needs **two** signature words (the criterion is a relation
@@ -83,6 +83,13 @@ architecture group only: a changed expectation is a changed criterion, and tunin
 out was meant to prevent.
 
 ## Measured results (2026-10-30, model d08c4b3 + D-13/D-168 fixes)
+
+> 🛑 **These values are DEAD as of `D-311` (2026-11-02).** They were measured with the
+> `li_addr` → `scbnds` bootstrap, which no longer works: an integer write pins
+> `bits 63..57 = 0000000` = the encoding-unavailable value, so `SCBNDS` fails on every
+> case. The bootstrap is now `csrr c1, mroot` → `cadd` → `scbnds`. **Current values live
+> in `docs/test/m2-baseline.md`** (architecture repo) and in `expect.csv`. Kept here only
+> as a record of what was measured then -- ⛔ do not read them as current.
 
 | program | signature word | reading |
 |---|---|---|

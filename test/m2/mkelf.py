@@ -153,6 +153,20 @@ def sc(cs2, cs1, offset=0):
         | ((imm & 0x1F) << 7) | 0x23
 
 
+# --- CSR access. `mroot` is the ONLY source of a pointer in this architecture
+# (ADR-0034 decision 1 / spec ch10), and it is read through the *capability* view:
+# `csrr c1, mroot` writes C(rd), not X(rd) (D-302). Encoding is plain CSRRS with
+# rs1 = x0, i.e. what assembly calls `csrr`.
+MROOT = 0xFC0          # spec/ch10: address 0xFC0, 64-bit, M-level read-only
+
+
+def csrr_cap(cd, csr):
+    """csrr <cap reg>, <csr> -- CSRRS rd, csr, x0 (rs1 = x0, funct3 = 010)."""
+    assert 1 <= cd <= 31, "csrr_cap: rd must be a register we actually use"
+    assert 0 <= csr <= 0xFFF, "csrr_cap: csr %#x does not fit 12 bits" % csr
+    return ((csr & 0xFFF) << 20) | (0 << 15) | (0b010 << 12) | (cd << 7) | 0x73
+
+
 # ---------------------------------------------------------------- ELF container
 
 TEXT_ADDR = 0x80000000
@@ -295,23 +309,43 @@ def _tail_store_sig():
     ]
 
 
-def prog_u1():
-    """U1: Bare -> SCBNDS -> Aligned PTR, then CADD +8 inside the slot."""
+def _bootstrap(_X3_delta=None):
+    """The shared bootstrap (m2-baseline.md section 2, rewritten 2026-11-02 by D-311).
+
+        csrr  c1, mroot        root: Aligned / N = 48 / address = 0
+        cadd  c1, c1, x3       move to 0x8000_0000 (still inside the N=48 slot)
+        addi  x2, x0, 12       N = 12
+        scbnds c1, c1, x2      narrow to [0x8000_0000, 0x8000_0FFF]
+
+    Why the old three-instruction `lui/slli/srli` head is gone: an integer write pins
+    `bits 63..57 = 0000000`, which is the *encoding-unavailable* value (D-274/D-280/
+    D-303) -- it is not a "loose form that derives everywhere". `SCBNDS` requires `cs1`
+    to be a PTR, so the old step 4 failed on every case and every signature came out
+    as the failure exit. Hence: the root is the only way in.
+
+    `scbnds` here is a *narrowing* (N_c = 12 != N_p = 48) => a real re-sign into the
+    `xpkey` domain; it does not take the same-slot short circuit (ADR-0034 decision 4).
+    """
     return [
-        *li_addr(X1, TEXT_ADDR),    # x1 = 0x8000_0000, FormBare (tag = 0000000)
-        addi(X2, 0, 12),             # N = 12  (4 KiB slot)
-        scbnds(X1, X1, X2),          # c1 <- Aligned PTR, slot [0x8000_0000, 0x8000_0FFF]
+        csrr_cap(X1, MROOT),
+        *li_addr(X3, TEXT_ADDR),     # x3 = 0x8000_0000 as an integer delta
+        cadd(X1, X1, X3),            # address only; bits 63..48 unchanged (ADR-0018)
+        addi(X2, 0, 12),             # N = 12 -> 4 KiB slot
+        scbnds(X1, X1, X2),
+    ]
+
+
+def prog_u1():
+    """U1: root -> Aligned PTR, then CADD +8 inside the slot."""
+    return _bootstrap() + [
         addi(X3, 0, 8),              # delta = 8
-        cadd(X1, X1, X3),            # c1.address += 8, still Aligned
+        cadd(X1, X1, X3),            # address += 8, still Aligned
     ] + _tail_store_sig()
 
 
 def prog_u2():
-    """U2: push to the top of the slot with SCADDR, then CADD past the end -> poisoned."""
-    return [
-        *li_addr(X1, TEXT_ADDR),
-        addi(X2, 0, 12),
-        scbnds(X1, X1, X2),          # Aligned, slot [0x8000_0000, 0x8000_0FFF]
+    """U2: push to the top of the slot with SCADDR, then CADD past the end -> failure exit."""
+    return _bootstrap() + [
         lui(X4, 0x1),                # x4 = 0x1000
         addi(X4, X4, -8),            # x4 = 0xFF8
         scaddr(X1, X1, X4),          # c1.address = 0x8000_0FF8, still inside the slot
@@ -321,11 +355,23 @@ def prog_u2():
 
 
 def prog_u3():
-    """U3: skip SCBNDS -- c1 stays Bare, CADD derives across the whole address space."""
+    """U3: an encoding-unavailable value as the operand -- NOT the bootstrap.
+
+    m2-baseline.md section 3 + 3.0 (D-311): the input address is deliberately placed on
+    the `bit 47 = 1` side. Under the old Bare semantics this value (0xFFFF_8000_8000_0000)
+    could not be produced at all, so a "helpful" recompute of the expectation cannot keep
+    this case green while silently testing the wrong thing.
+
+        0x8000_8000_0000 = 2^47 + 2^31, built as li_addr(0x8000_8000) then << 16
+        (li_addr only ever yields a 32-bit result: it clears the upper half by design)
+
+    CADD on it fails => failure exit = sign-extend of the input address.
+    """
     return [
-        *li_addr(X1, TEXT_ADDR),    # Bare, no SCBNDS
+        *li_addr(X1, 0x80008000),    # x1 = 0x0000000080008000
+        slli(X1, X1, 16),            # x1 = 0x800080000000 = 0x8000_8000_0000 (bit47 = 1)
         addi(X3, 0, 8),
-        cadd(X1, X1, X3),            # ADR-0019: Bare derives everywhere, no trap
+        cadd(X1, X1, X3),
     ] + _tail_store_sig()
 
 
@@ -340,21 +386,20 @@ def prog_u4():
         [8] written after  CADD   -> the *same* bits 63..48, address + 8
 
     Assertions (D-176 section 4):
-        a) bits 63..48 identical in both words  (first-measurement truth 0x98C8, kept)
+        a) bits 63..48 identical in both words
         b) bits 47..0  of the second = first + 8
 
-    Both are checked as absolute values by run.sh:
-        [0] = 0x98C8_0000_8000_0008   (same word U1 already pins)
-        [8] = 0x98C8_0000_8000_0010   (high half unchanged, low half + 8)
+    ⚠️ The absolute values are now measured, not predicted: the bootstrap moved to
+    `mroot` (D-311), so the old first-measurement word `0x98C8_...` is a Bare-era value
+    and no longer applies. `expect.csv` carries whatever `run.sh` measured, filled in by
+    the architecture group (`m2-baseline.md` section 6 rule 3: derived quantities are
+    recorded, never predicted).
 
-    ADR-0005: the only places that sign a capability are SCBNDS and DIDW. CADD changes
-    the address and nothing else, so a changed `pac` here means CADD went through a
-    signing path -- a model defect, not a test bug.
+    ADR-0005: the only places that sign a capability are the production points; CADD
+    changes the address and nothing else, so a changed `pac` here means CADD went through
+    a signing path -- a model defect, not a test bug.
     """
-    return [
-        *li_addr(X1, TEXT_ADDR),
-        addi(X2, 0, 12),
-        scbnds(X1, X1, X2),          # c1 <- Aligned PTR, slot [0x8000_0000, 0x8000_0FFF]
+    return _bootstrap() + [
         *li_addr(X5, SCRATCH_ADDR),  # x5 = 0x8000_1000
         sc(X1, X5, 0),               # before: c1 -> scratch
         ld(X6, 0, X5),
