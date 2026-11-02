@@ -361,6 +361,17 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 // Notes: the blueprint's getCapBoundsBits returns the FIELD widths (CapAddrBits, CapLenBits)
 // and leaves the extension to each caller; there is no GCBase/GCBound there to compare
 // against, so this is a TruISA choice, not a divergence from a blueprint body.
+// The N/C field encoding of an exponent (D-305 section 5). One definition so that every
+// producer of an Aligned pointer converts the same way -- if the field width ever changes,
+// this is the only line to touch.
+// Warning: `n` must be a legal exponent. The bound is asserted rather than clamped,
+// because a clamp would turn a spec violation into a silently wrong slot.
+val  ncOfN : int -> bits(cap_nc_width)
+function ncOfN(n : int) -> bits(cap_nc_width) = {
+  assert(n >= 0 & n <= cap_address_width);
+  get_slice_int(cap_nc_width, n, 0)
+}
+
 // The root pointer mroot hands out (D-302): an ALIGNED pointer with N = VA and address 0
 // -- the whole-address-space slot, its base being SlotBase(0, VA) = 0. Signed with rootkey
 // because isRootForm(signPtr) keys it that way. salt is zero: the aligned path has no
@@ -368,7 +379,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 // Nothing here reads memory or the table, which is what lets it run before a stack exists.
 val  truisaMroot : unit -> Capability
 function truisaMroot(_ : unit) -> Capability = {
-  let n_va : bits(cap_nc_width) = get_slice_int(cap_nc_width, cap_address_width, 0);
+  let n_va : bits(cap_nc_width) = ncOfN(cap_address_width);
   let raw : Capability = struct {
     mode    = 0b1,
     nc      = n_va,
