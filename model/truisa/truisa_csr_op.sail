@@ -26,6 +26,13 @@
  *     zero CRE dependence, and "readable at CRE = 0" is the bootstrap precondition, not
  *     an special case.
  */
+// Registration. Without this, check_CSR rejects 0xFC0 before handle_csr_op is ever
+// reached -- the run silently falls back to the generic path and mroot reads as 0.
+// (Measured: the probe produced a zero signature until this clause existed.)
+// csr_name_map is a `scattered mapping`, not a function; leaving it default only costs a
+// hex number instead of the name in traces.
+function clause is_CSR_defined (0xFC0) = true
+
 function handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead) =
   if csr == 0xFC0 then {
     C(rd) = truisaMroot();
