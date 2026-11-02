@@ -88,7 +88,9 @@ set(sail_common
         # "undefined reference to zhandle_csr_op" -- a `val` without a body is an external to
         # Sail. This one-line base file is the definition (it delegates to
         # default_handle_csr_op, which zicsr defines at :54). It must stay AFTER zicsr.
-        "riscv_csr_op.sail"
+        # D-302: swapped for the TruISA override. mroot is the only CSR whose read
+        # yields a pointer, so it cannot go through the integer view.
+        "truisa/truisa_csr_op.sail"
         "riscv_insts_fext.sail"
         "riscv_insts_zcf.sail"
         "riscv_insts_dext.sail"

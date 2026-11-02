@@ -243,6 +243,13 @@ function getCapPac(cap : Capability) -> CapPacBits =
 // production points. The m = 0 cases are resolved by D-108 ruling A: for a one-byte slot at
 // address 0 it is reachable and legal, while N = VA returning 0 is an ADR-0026 ruling.
 // why: doc/truisa-deltas.md#signptr
+// The key is decided by FORM alone (ADR-0034 decision 3): an aligned pointer with N = VA
+// uses rootkey, everything else uses xpkey. There is no selector bit and no dependence on
+// CRE or privilege -- that is what keeps the bootstrap chain independent of both.
+val  isRootForm : Capability -> bool
+function isRootForm(cap : Capability) -> bool =
+  (cap.mode == 0b1) & (unsigned(cap.nc) == cap_address_width)
+
 val  signPtr : (Capability, CapSaltBits) -> Capability
 function signPtr(cap : Capability, salt : CapSaltBits) -> Capability = {
   let hi7 = getCapTagBits(cap);
@@ -253,7 +260,7 @@ function signPtr(cap : Capability, salt : CapSaltBits) -> Capability = {
   struct {
     mode    = cap.mode,
     nc      = cap.nc,
-    pac     = truisaMac(truisa_xpkey_stub, msg),
+    pac     = truisaMac(if isRootForm(cap) then truisa_rootkey_stub else truisa_xpkey_stub, msg),
     address = cap.address,
   }
 }
@@ -327,7 +334,13 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
    * (ADR-0029 invariant I2 -- those bits are not part of the value). */
   let base_ok   = base == parent.address[cap_address_width - 1 .. 0];
   if form_ok & n_ok & in_parent & base_ok then
-    (true, makeCapAligned(parent, n, false))
+    // ADR-0034 decision 4: when the child exponent equals the parent's there is nothing to
+    // narrow, so copying the parent bit for bit is the right answer -- re-signing would
+    // stamp an xpkey signature onto an N = VA pointer, which verifies under rootkey and
+    // would therefore always mismatch. In the bootstrap chain this is NOT hit: scbnds
+    // there narrows, so it takes the re-signing branch.
+    if k == kp then (true, parent)
+    else (true, makeCapAligned(parent, n, false))
   else
     (false, parent)
 }
@@ -348,6 +361,23 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 // Notes: the blueprint's getCapBoundsBits returns the FIELD widths (CapAddrBits, CapLenBits)
 // and leaves the extension to each caller; there is no GCBase/GCBound there to compare
 // against, so this is a TruISA choice, not a divergence from a blueprint body.
+// The root pointer mroot hands out (D-302): an ALIGNED pointer with N = VA and address 0
+// -- the whole-address-space slot, its base being SlotBase(0, VA) = 0. Signed with rootkey
+// because isRootForm(signPtr) keys it that way. salt is zero: the aligned path has no
+// entry and therefore carries no salt (ADR-0005 decision 12).
+// Nothing here reads memory or the table, which is what lets it run before a stack exists.
+val  truisaMroot : unit -> Capability
+function truisaMroot(_ : unit) -> Capability = {
+  let n_va : bits(cap_nc_width) = get_slice_int(cap_nc_width, cap_address_width, 0);
+  let raw : Capability = struct {
+    mode    = 0b1,
+    nc      = n_va,
+    pac     = zeros(),
+    address = zeros(),
+  };
+  signPtr(raw, zeros())
+}
+
 val  getCapBoundsBits : Capability -> option((bits(cap_ptr_width), bits(cap_ptr_width)))
 function getCapBoundsBits(cap : Capability) -> option((bits(cap_ptr_width), bits(cap_ptr_width))) = {
   // Only the aligned form has bounds. A descriptor needs the table (phase B); an
