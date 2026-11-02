@@ -77,7 +77,14 @@ struct Capability = {
 }
 
 // The poison value WITH A ZERO ADDRESS: mode 0, N/C all ones, PAC 0, address 0
-// The failure exit, parameterised by the CALLER's address (D-291 / D-297).
+// An encoding-unavailable value built from an address: bits 63-48 are a copy of that
+// address's bit 47, bits 47-0 are the address itself.
+//
+// BOTH exits share this constructor -- they differ only in WHICH address goes in
+// (spec/ch06 "输入非法出口"):
+//   failure exit       (a criterion failed)  -> the CALLER's address   (repair entry, D-291)
+//   input-illegal exit (the parent is unavailable) -> the RESULT address (D-318)
+// Sharing the shape is deliberate; sharing the argument would erase the distinction.
 //
 //   bits 63-48 = a copy of bit 47   and   bits 47-0 = the caller's address
 //
@@ -90,8 +97,8 @@ struct Capability = {
 // keep it at zero: ch03's "bits 56-48 take no particular value" is about ARBITRARY
 // unavailable encodings (e.g. a forged word loaded by LC), not about this exit, which is a
 // specially specified one (S-297 section 2).
-val  truisaPoison : bits(cap_ptr_width) -> Capability
-function truisaPoison(addr : bits(cap_ptr_width)) -> Capability =
+val  truisaUnavailable : bits(cap_ptr_width) -> Capability
+function truisaUnavailable(addr : bits(cap_ptr_width)) -> Capability =
   if addr[cap_address_width - 1] == bitzero then
     struct { mode = 0b0, nc = zeros(), pac = zeros(), address = addr }
   else
@@ -215,7 +222,7 @@ function getCapKey(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
 // why: doc/truisa-deltas.md#poisonif
 val  poisonIf : (Capability, bool) -> Capability
 function poisonIf(cap : Capability, cond : bool) -> Capability =
-  if cond then truisaPoison(cap.address) else cap
+  if cond then truisaUnavailable(cap.address) else cap
 
 
 // ---- PAC algorithm boundary ------------------------------------------------------------
@@ -291,7 +298,7 @@ function makeCapAligned(parent : Capability, n : bits(cap_nc_width), fail : bool
     -> Capability =
   // Notes: `parent.address`, not the slot base and not 0 (D-224) -- the slot base is a
   // derived position that can fall outside `parent` as n grows, and 0 carries no information.
-  if fail then truisaPoison(parent.address)
+  if fail then truisaUnavailable(parent.address)
   else {
     let q : Capability = struct {
       mode    = 0b1,
@@ -324,10 +331,18 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   // makeCapAligned's signature (fixed by CR-MAC-01 Rev.1) has no place for it.
   let k         = unsigned(n);
   let kp        = unsigned(parent.nc);
+  let n_ok      = k <= cap_address_width;
+  /* Input-illegal exit (spec/ch06, D-318): an unavailable parent does NOT trap and does NOT
+   * fall through to the failure exit -- the blueprint narrows the address as usual and only
+   * clears the tag. The RESULT address is the slot base of the requested exponent, computed
+   * from the parent's address field exactly as it would be for a usable parent. */
+  if getCapForm(parent) == None() then
+    (true, truisaUnavailable(sign_extend(
+             getCapSlotBase(parent.address[cap_address_width - 1 .. 0], n))))
+  else {
   // The parent must be an ALIGNED pointer: there is no Bare form any more (D-274/D-276),
   // and a Descriptor parent has no N to nest under.
   let form_ok   = getCapForm(parent) == Some(FormAligned);
-  let n_ok      = k <= cap_address_width;
   let in_parent = k >= kp;
   /* `base` is CapAddrBits (48) and the struct field is 64: slice the right-hand side so
    * the comparison is between addresses, not between an address and 16 redundant bits
@@ -343,6 +358,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
     else (true, makeCapAligned(parent, n, false))
   else
     (false, parent)
+  }
 }
 
 // 1c. The bounds projection, and the checked pointer increment. Both requested by the
@@ -450,7 +466,17 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
    * there is no table -- a descriptor pointer's criterion (2) needs its entry. When the
    * table lands, descriptors must take the look-up path here; do NOT leave them on the
    * copy-as-is path (D-297 3.2). */
-  if getCapForm(cap) != Some(FormAligned) then cap
+  if getCapForm(cap) == None() then
+    /* Input-illegal exit (spec/ch06, D-318): a derivation instruction does NOT trap when its
+     * parent is unavailable -- the blueprint computes the address as usual and only clears
+     * the tag, and this architecture has no out-of-band tag, so the invalidity goes into
+     * bits 63-48. The address here is the RESULT (the new address we were asked to set),
+     * not the parent's: SCADDR computes it either way. */
+    truisaUnavailable(sign_extend(addr))
+  else if getCapForm(cap) == Some(FormDescriptor) then
+    // TODO(phase B): descriptors need their entry for criterion (2). Until the table
+    // exists they are copied as-is -- do NOT leave them here once the table lands.
+    cap
   else {
     let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
     let newCap : Capability = struct {
