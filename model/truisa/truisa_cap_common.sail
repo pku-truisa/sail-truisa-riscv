@@ -77,16 +77,25 @@ struct Capability = {
 }
 
 // The poison value WITH A ZERO ADDRESS: mode 0, N/C all ones, PAC 0, address 0
-// (docs/isa/03 3.6) -- not CHERI's tag-clearing. This is the `addr(x) = 0` special case of
-// `0x7E00 << 48 | addr(x)` (ADR-0003 r25). Real poisoning goes through poisonIf, which
-// keeps the caller's address.
-let truisa_poison_cap : Capability = struct {
-  mode    = 0b0,
-  // `ones(...)` not a 6-bit literal: the field is cap_nc_width wide, not always 6.
-  nc      = ones(cap_nc_width),
-  pac     = zeros(),
-  address = zeros(),
-}
+// The failure exit, parameterised by the CALLER's address (D-291 / D-297).
+//
+//   bits 63-48 = a copy of bit 47   and   bits 47-0 = the caller's address
+//
+// so bit47 = 0 gives label 0000000 and bit47 = 1 gives label 1111111. Both are
+// encoding-unavailable (getCapForm returns None()), which is what makes the exit
+// fail-closed now that there is no third form (D-274/D-276/D-280) and no poisoning
+// mechanism (D-280).
+//
+// Warning: the copy covers bits 56-48 AS WELL -- the 9-bit authentication segment. Do not
+// keep it at zero: ch03's "bits 56-48 take no particular value" is about ARBITRARY
+// unavailable encodings (e.g. a forged word loaded by LC), not about this exit, which is a
+// specially specified one (S-297 section 2).
+val  truisaPoison : bits(cap_ptr_width) -> Capability
+function truisaPoison(addr : bits(cap_ptr_width)) -> Capability =
+  if addr[cap_address_width - 1] == bitzero then
+    struct { mode = 0b0, nc = zeros(), pac = zeros(), address = addr }
+  else
+    struct { mode = 0b1, nc = ones(),  pac = ones(),  address = addr }
 
 // Notes: There is no `capToBits` any more (ADR-0029 decision 3): with `address` at 64 bits the
 // blueprint's own shape applies too (cheri_insts.sail:211). Notes: Do not rescue it.
@@ -181,9 +190,24 @@ function getCapMacInput(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
 
 // The table key. Same as the MAC input except at N = 0, where a one-byte object has no
 // midpoint and the key uses the reserved value 0 (D-66 / isa/03 3.4.4 item 1).
+//
+// The two quantities differ ONLY at N = 0. The asserts below are the documentation of that
+// fact (D-297 3.1) -- they are compile-time, so they also fail the build if either formula
+// drifts. p0 is deliberately non-zero: with p = 0 "key is 0" and "m is base = p" would
+// coincide and prove nothing.
 val  getCapKey : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
 function getCapKey(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
   if unsigned(n) == 0 then zeros() else getCapMacInput(p, n)
+
+// Three properties that pin the split down (D-297 3.1). They are stated here because the
+// model has no top-level assert, and because writing a test for them belongs to the test
+// group (who own the expectations, not us):
+//
+//   N = 0   getCapKey(p, 0)      == 0        and   getCapMacInput(p, 0) == p      (DIFFER)
+//   N = 48  getCapKey(p, 48)     == 2^47     and   getCapMacInput(p, 48) == 2^47  (SAME)
+//
+// Use a NON-zero p when testing the first line: with p = 0 the two formulas coincide and
+// the test proves nothing.
 
 // 1a-8. poisonIf -- the single failure exit of every PTR-producing instruction, and the
 // ADDRESS IS PRESERVED (ADR-0003 r25): it is the repair entry point, so it must not hold
@@ -191,7 +215,7 @@ function getCapKey(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
 // why: doc/truisa-deltas.md#poisonif
 val  poisonIf : (Capability, bool) -> Capability
 function poisonIf(cap : Capability, cond : bool) -> Capability =
-  if cond then { truisa_poison_cap with address = cap.address } else cap
+  if cond then truisaPoison(cap.address) else cap
 
 
 // ---- PAC algorithm boundary ------------------------------------------------------------
@@ -260,7 +284,7 @@ function makeCapAligned(parent : Capability, n : bits(cap_nc_width), fail : bool
     -> Capability =
   // Notes: `parent.address`, not the slot base and not 0 (D-224) -- the slot base is a
   // derived position that can fall outside `parent` as n grows, and 0 carries no information.
-  if fail then { truisa_poison_cap with address = parent.address }
+  if fail then truisaPoison(parent.address)
   else {
     let q : Capability = struct {
       mode    = 0b1,
@@ -378,9 +402,13 @@ function carryOutOfAddrField(a : CapAddrBits, delta : xlenbits) -> bool = {
 // caller would exist. why: doc/truisa-deltas.md#scaddr
 val  setCapAddrChecked : (Capability, CapAddrBits) -> Capability
 function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability = {
-  /* Inputs whose encoding is unavailable -- and, in phase A, descriptors (no table yet) --
-   * are copied as they are, never laundered into something usable. This is the ONE place
-   * the form is dispatched for the address setter. */
+  /* Inputs whose encoding is unavailable are copied as they are, never laundered into
+   * something usable. This is the ONE place the form is dispatched for the address setter.
+   *
+   * TODO(phase B): this branch also swallows FormDescriptor, which is only right while
+   * there is no table -- a descriptor pointer's criterion (2) needs its entry. When the
+   * table lands, descriptors must take the look-up path here; do NOT leave them on the
+   * copy-as-is path (D-297 3.2). */
   if getCapForm(cap) != Some(FormAligned) then cap
   else {
     let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
@@ -393,7 +421,7 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
     /* Criteria (1) then (2), in the spec's order, so a future xtval can say which failed
      * first. One call each -- the definitions are in 1c-2a, not here.
      * Notes: the poisoned result carries the CALLER's address, not `addr` (D-224). The
-     * poison address is a REPAIR ENTRY POINT: software re-binds from it (SCBNDS/DIDW), so
+     * poison address is a REPAIR ENTRY POINT: software re-binds from it (SCBNDS/DSTR), so
      * handing back the address that failed to be written would rebuild the pointer in
      * somebody else's object -- fail-then-repair must not become a privilege escalation. */
     poisonIf(cap, not(sameSlot(a, cap.nc, addr)) | not(ptrIntact(cap)))
