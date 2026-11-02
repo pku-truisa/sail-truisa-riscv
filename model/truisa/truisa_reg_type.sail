@@ -32,7 +32,7 @@ type regtype = Capability
  * ⚠️ Spelled field by field rather than `null_cap`: TruISA has no `null_cap` symbol
  * (it is CHERI's tag=false carrier; TruISA has no tag -- ADR-0001/ADR-0003), and it
  * must not grow one either -- all-zero metadata gives label 0000000, which getCapForm
- * maps to FormBare at address 0 (docs/isa/03 section 3.3), so the value here is a
+ * is encoding-unavailable (getCapForm returns None()), so the value here is a
  * BARE POINTER AT ADDRESS ZERO. Same value, but not the same concept as CHERI's
  * first-class "null capability"; borrowing the blueprint's name would hide that
  * (D-115: do not write a count that this very comment would change).

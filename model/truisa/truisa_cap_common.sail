@@ -11,8 +11,7 @@
 
 // Widths live in the prelude trio, not here:
 //   truisa_prelude_64.sail / _32.sail   the per-XLEN literals
-//   truisa_prelude_xlen.sail            picks between them, derives the rest, and holds
-//                                       truisa_poison_tag
+//   truisa_prelude_xlen.sail            picks between them and derives the rest
 // This file contains no `if xlen == 32` and must never grow one. If a value needs to differ
 // per XLEN, add a candidate there and choose it in prelude_xlen.
 
@@ -124,17 +123,17 @@ function getCapTagBits(cap : Capability) -> CapTagBits =
 // 1a-5. Which of the five forms the label denotes (docs/isa/03 section 3.3). The order is
 // Order is not negotiable: both Bare codes first (a descriptor with C = 0 encodes as
 // 0000000), then the poison code, then bit 63. why: doc/truisa-deltas.md#forms
-val  getCapForm : Capability -> CapPtrForm
-function getCapForm(cap : Capability) -> CapPtrForm = {
-  let tag = getCapTagBits(cap);
+// None() means "encoding unavailable" -- there is no third form (spec/ch03 3.1).
+// The range checks below are the whole test: every rejected label (0000000, 0111111,
+// 1111111) falls out of them, so there is no per-label branch to keep in sync.
+// why: doc/truisa-deltas.md#forms
+val  getCapForm : Capability -> option(CapPtrForm)
+function getCapForm(cap : Capability) -> option(CapPtrForm) = {
   let n : int = unsigned(cap.nc);
-  if tag == ones() then FormBare
-  else if tag == zeros() then FormBare
-  else if tag == truisa_poison_tag then FormPoisoned
-  else if cap.mode == 0b1 then
-    (if n <= cap_address_width then FormAligned else FormInvalid)
+  if cap.mode == 0b1 then
+    (if n <= cap_address_width then Some(FormAligned) else None())
   else
-    (if n >= 1 & n <= cap_address_width - 1 then FormDescriptor else FormInvalid)
+    (if n >= 1 & n <= cap_address_width - 1 then Some(FormDescriptor) else None())
 }
 
 // 1a-6. Slot base: S = p with the low N bits cleared, i.e. (p >> N) << N.
@@ -152,16 +151,25 @@ function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
 // Never call 0 "reserved" without naming which case. "1B not in table" (ADR-0006) is a
 // matched pair with the N = 0 case: with m = S, an entry at m = 0 collides with address 0.
 // why: doc/truisa-deltas.md#centroid
-val  getCapCentroID : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
-function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
+/* There are TWO different quantities here, and folding them into one function is what made
+ * D-284 read as "N = 0 returns 0":
+ *
+ *   m     (MAC input, D-108)  N = 0 -> S (the slot base)   N = 48 -> 2^47
+ *   key   (table key, D-66)   N = 0 -> 0 (reserved)        N = 48 -> 2^47
+ *
+ * They agree at N = 48 and differ ONLY at N = 0. The single caller of the MAC-input form
+ * is signPtr; the key form has no caller in phase A (no table yet).
+ *
+ * N = 48 needs no special case: base = getCapSlotBase(p, 48) = 0 and half = 2^47, so the
+ * general formula already yields 2^47. D-284 raised this from the old `zeros()`.
+ */
+val  getCapMacInput : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
+function getCapMacInput(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
   // Warning: k must be nat, not int. Written as int (unsigned(n) coerced) Sail cannot prove
   // `k >= 0` and rejects the shift with "Could not resolve quantifiers for shiftl".
-  // getCapSlotBase gets away with it only because it inlines unsigned(n) at the shift,
-  // where the non-negativity is still visible.
   let k : nat = unsigned(n);
   let base : CapAddrBits = getCapSlotBase(p, n);
   if k == 0 then base
-  else if k == cap_address_width then zeros()
   else {
     let twop : bits(64) = 0x0000_0000_0000_0001 << k;
     // Warning: truncate takes TWO arguments in Sail: the value and the target width
@@ -170,6 +178,12 @@ function getCapCentroID(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
     base + half
   }
 }
+
+// The table key. Same as the MAC input except at N = 0, where a one-byte object has no
+// midpoint and the key uses the reserved value 0 (D-66 / isa/03 3.4.4 item 1).
+val  getCapKey : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
+function getCapKey(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
+  if unsigned(n) == 0 then zeros() else getCapMacInput(p, n)
 
 // 1a-8. poisonIf -- the single failure exit of every PTR-producing instruction, and the
 // ADDRESS IS PRESERVED (ADR-0003 r25): it is the repair entry point, so it must not hold
@@ -208,9 +222,9 @@ function getCapPac(cap : Capability) -> CapPacBits =
 val  signPtr : (Capability, CapSaltBits) -> Capability
 function signPtr(cap : Capability, salt : CapSaltBits) -> Capability = {
   let hi7 = getCapTagBits(cap);
-  /* Slices [VA-1..0]: getCapCentroID's first parameter is CapAddrBits (48), not the
+  /* Slices [VA-1..0]: getCapMacInput's first parameter is CapAddrBits (48), not the
    * 64-bit struct field. The redundant high bits are not part of the address. */
-  let m   = getCapCentroID(cap.address[cap_address_width - 1 .. 0], cap.nc);
+  let m   = getCapMacInput(cap.address[cap_address_width - 1 .. 0], cap.nc);
   let msg : bits(cap_mac_msg_width) = hi7 @ m @ salt;
   struct {
     mode    = cap.mode,
@@ -277,12 +291,13 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   // cs1_val.address, so it always equals parent.address today; it is kept as a separate
   // parameter because a future instruction may derive base from somewhere else, and
   // makeCapAligned's signature (fixed by CR-MAC-01 Rev.1) has no place for it.
-  let form      = getCapForm(parent);
   let k         = unsigned(n);
   let kp        = unsigned(parent.nc);
-  let form_ok   = form == FormAligned | form == FormBare;
+  // The parent must be an ALIGNED pointer: there is no Bare form any more (D-274/D-276),
+  // and a Descriptor parent has no N to nest under.
+  let form_ok   = getCapForm(parent) == Some(FormAligned);
   let n_ok      = k <= cap_address_width;
-  let in_parent = if form == FormBare then true else k >= kp;
+  let in_parent = k >= kp;
   /* `base` is CapAddrBits (48) and the struct field is 64: slice the right-hand side so
    * the comparison is between addresses, not between an address and 16 redundant bits
    * (ADR-0029 invariant I2 -- those bits are not part of the value). */
@@ -311,14 +326,10 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 // against, so this is a TruISA choice, not a divergence from a blueprint body.
 val  getCapBoundsBits : Capability -> option((bits(cap_ptr_width), bits(cap_ptr_width)))
 function getCapBoundsBits(cap : Capability) -> option((bits(cap_ptr_width), bits(cap_ptr_width))) = {
-  let form = getCapForm(cap);
-  if form == FormPoisoned | form == FormInvalid | form == FormDescriptor then None()
-  else if form == FormBare then {
-    /* Whole address space: first byte 0, last byte 2^VA - 1. */
-    let lo : CapAddrBits = zeros();
-    let hi : CapAddrBits = ones();
-    Some((sign_extend(lo), sign_extend(hi)))
-  } else {
+  // Only the aligned form has bounds. A descriptor needs the table (phase B); an
+  // encoding-unavailable pointer has none by definition.
+  if getCapForm(cap) != Some(FormAligned) then None()
+  else {
     /* Aligned: [S, S + 2^N - 1]. S is already N-aligned, so the addition cannot leave
      * the field. N = VA is legal (ADR-0026) and lands on the same all-ones value. */
     let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
@@ -340,19 +351,14 @@ function getCapBoundsBits(cap : Capability) -> option((bits(cap_ptr_width), bits
  * cross the half while SCADDR refuses to would make relative moves and absolute writes
  * disagree about legality (ADR-0029 decision 11.4). Cost: a bare pointer cannot cross
  * 2^(VA-1). */
-val  sameSlot : (CapAddrBits, bits(cap_nc_width), CapPtrForm, CapAddrBits) -> bool
-function sameSlot(a : CapAddrBits, nc : bits(cap_nc_width), form : CapPtrForm,
-                  b : CapAddrBits) -> bool =
-  if form == FormBare then
-    a[cap_address_width - 1] == b[cap_address_width - 1]
-  else
-    getCapSlotBase(a, nc) == getCapSlotBase(b, nc)
+// Both predicates used to take a `form` argument to special-case Bare. Bare is gone
+// (D-274/D-276), so the aligned slot rule is the only one left.
+val  sameSlot : (CapAddrBits, bits(cap_nc_width), CapAddrBits) -> bool
+function sameSlot(a : CapAddrBits, nc : bits(cap_nc_width), b : CapAddrBits) -> bool =
+  getCapSlotBase(a, nc) == getCapSlotBase(b, nc)
 
-// (2) intact: bare is SKIPPED -- bare is never signed (ADR-0005 decision 3), so its PAC
-// stays zero and any comparison would be trivially false (ADR-0029 decision 11.2).
-val  ptrIntact : (Capability, CapPtrForm) -> bool
-function ptrIntact(cap : Capability, form : CapPtrForm) -> bool =
-  if form == FormBare then true else verifyPtr(cap, keySalt(cap))
+val  ptrIntact : Capability -> bool
+function ptrIntact(cap : Capability) -> bool = verifyPtr(cap, keySalt(cap))
 
 // (3) a carry out of the address field, judged ON THE FIELD. Notes: never judge it as
 // `sign_extend(new48) == sum`, which is identically false whenever bit(VA-1) is set, so it
@@ -372,10 +378,10 @@ function carryOutOfAddrField(a : CapAddrBits, delta : xlenbits) -> bool = {
 // caller would exist. why: doc/truisa-deltas.md#scaddr
 val  setCapAddrChecked : (Capability, CapAddrBits) -> Capability
 function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability = {
-  let form = getCapForm(cap);
-  /* Illegal inputs are copied as they are, never laundered into something usable. This is
-   * the ONE place the form is dispatched for the address setter. */
-  if form == FormPoisoned | form == FormInvalid then cap
+  /* Inputs whose encoding is unavailable -- and, in phase A, descriptors (no table yet) --
+   * are copied as they are, never laundered into something usable. This is the ONE place
+   * the form is dispatched for the address setter. */
+  if getCapForm(cap) != Some(FormAligned) then cap
   else {
     let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
     let newCap : Capability = struct {
@@ -390,7 +396,7 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
      * poison address is a REPAIR ENTRY POINT: software re-binds from it (SCBNDS/DIDW), so
      * handing back the address that failed to be written would rebuild the pointer in
      * somebody else's object -- fail-then-repair must not become a privilege escalation. */
-    poisonIf(cap, not(sameSlot(a, cap.nc, form, addr)) | not(ptrIntact(cap, form)))
+    poisonIf(cap, not(sameSlot(a, cap.nc, addr)) | not(ptrIntact(cap)))
   }
 }
 
@@ -402,14 +408,13 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
 // overflow is ALLOWED (mod 2^VA). why: doc/truisa-deltas.md#incaddr
 val  incCapAddrChecked : (Capability, xlenbits) -> Capability
 function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
-  let form = getCapForm(cap);
   let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
   let sum : bits(cap_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-  // Warning: THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without it
-  // an illegal input that happens to overflow would be poisoned by the outer call even
-  // though criteria (1)/(2) never ran -- FormInvalid laundered into FormPoisoned.
+  // Warning: THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without
+  // it an input whose encoding is unavailable would be poisoned by the outer call even
+  // though criteria (1)/(2) never ran -- "unavailable" laundered into the failure exit.
   let carries : bool =
-    (form != FormPoisoned) & (form != FormInvalid) & carryOutOfAddrField(a, delta);
+    (getCapForm(cap) != None()) & carryOutOfAddrField(a, delta);
   /* Poisoned / invalid inputs come back untouched from setCapAddrChecked's own form
    * dispatch, and `carries` is false for them, so they are returned exactly as given. */
   /* Notes: the OUTER poison must pass `cap` too, not the inner result -- the inner call

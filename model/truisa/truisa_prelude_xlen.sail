@@ -85,10 +85,6 @@ let  truisa_mac_msg_width = sizeof(truisa_mac_msg_width)
 // Lets Sail prove `bits(truisa_ptr_width - truisa_address_width)` non-negative.
 constraint truisa_address_width <= truisa_ptr_width
 
-// The poison tag: mode = 0, N/C = all ones. Written symbolically because that literal is
-// 7 bits only at XLEN 64 -- Sail will not reduce `1 + (if xlen == 32 then 5 else 6)` to a
-// number it can compare against.
-let truisa_poison_tag : bits(truisa_tag_width) = 0b0 @ ones()
 
 /* ------------------------------------------------------------------------------------
  * Deleted from the blueprint (D-94), in blueprint order. None of it is moved elsewhere:

@@ -11,10 +11,17 @@
  * Decision order is documented at getCapForm in truisa_cap_common.sail -- the order is
  * not arbitrary, see the comment there.
  * ---------------------------------------------------------------------------------- */
+/* TWO forms, and only two (spec/ch03 3.1). The split is `bit 63`:
+ *   1 -> FormAligned     bounds computed by the DGU from (N, addr)
+ *   0 -> FormDescriptor  bounds read from the table entry (C, S)
+ * "Encoding unavailable" is NOT a third form: it is the ABSENCE of a form, and
+ * getCapForm returns None() for it. That covers every rejected label in one place --
+ *   0000000 (C = 0)        -> C outside 1..VA-1
+ *   0111111 (C = 63)       -> C outside 1..VA-1
+ *   1111111 (N = 63)       -> N outside 0..VA
+ * Do not reintroduce a per-label test: D-274/D-276/D-280 deleted both Bare and the
+ * poisoning mechanism, so those labels have no meaning of their own any more. */
 enum CapPtrForm = {
-  FormPoisoned,
-  FormBare,
-  FormInvalid,
   FormDescriptor,      // reserved: no operator produces it in phase 1
   FormAligned,
 }
