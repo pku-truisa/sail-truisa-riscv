@@ -11,7 +11,7 @@
 
 // Widths live in the prelude trio, not here:
 //   truisa_prelude_64.sail / _32.sail   the per-XLEN literals
-//   truisa_prelude_xlen.sail            picks between them and derives the rest
+//   truisa_prelude_xlen.sail            picks between them and derives the restf
 // This file contains no `if xlen == 32` and must never grow one. If a value needs to differ
 // per XLEN, add a candidate there and choose it in prelude_xlen.
 

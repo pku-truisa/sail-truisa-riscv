@@ -9,15 +9,17 @@
  *  So the function belongs here rather than in a base file we may not edit (ADR-0024
  *  section 11.4b: base files change only to delete CHERI code).
  *
- *  ⭐ Semantics: TruISA has no PC capability (ADR-0011 decision 2 -- instruction addresses
- *  are plain Bare addresses), so there is no target capability to build, seal or install.
- *  The target is simply the corresponding EPC. Alignment needs no separate step either:
- *  get_mepc()/get_sepc() already return align_pc(...).
+ *  ⭐ Semantics: instruction fetch IS authorized by a capability here -- what the summary
+ *  calls PCC (spec/summary-zh 5, the highest-priority concept document). But the ENTRY does
+ *  not build, seal or install a target capability: the target is simply the corresponding
+ *  EPC, whose metadata already carries the handler's segment. Alignment needs no separate
+ *  step either: get_mepc()/get_sepc() already return align_pc(...).
  *
  *  ⚠️ CHERI's version does three things this one must not copy: align_pc on the capability
- *  address (already covered by get_*epc), set_next_pcc (there is no PCC register here --
- *  the caller takes the RETURN VALUE as the next PC, see exception_handler), and
- *  unsealCap (TruISA has no sealed capabilities).
+ *  address (already covered by get_*epc), set_next_pcc (TruISA keeps the metadata of PCC
+ *  nowhere separate from pc itself -- there is no second register to set, and the caller
+ *  takes the RETURN VALUE as the next PC, see exception_handler), and unsealCap (TruISA
+ *  has no sealed capabilities).
  *
  *  ⭐ WHY THERE IS NO set_next_pc IN THIS FUNCTION -- do not "fix" this by adding one.
  *  The PC is set by the caller, one level above the ctl_result match:

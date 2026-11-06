@@ -27,7 +27,11 @@
 //  This is NOT a stub added to make the checker quiet: the identity IS the architecture
 //  here. There is no separate U-mode trap vector in TruISA -- stvec is a single register
 //  with base semantics (ADR-0011 decision 2) -- so reading it back is reading the value
-//  itself. Contrast with PCC, which was pure scaffolding and was deleted outright.
+//  itself.
+//  Notes: an earlier comment here read "Contrast with PCC, which was pure scaffolding and was
+//  deleted outright" -- that is superseded. Instruction fetch IS capability-authorized (the
+//  summary calls it PCC, spec/summary-zh 5); what TruISA does not have is a SEPARATE pcc
+//  register, because pc itself carries the metadata (ADR-0035 decision 6).
 function read_stvec_utvec(v : xlenbits) -> xlenbits = v
 
 //  ── vvv 以下是 model/riscv_sys_regs_access.sail 第 1-59 行的逐字副本 ──
