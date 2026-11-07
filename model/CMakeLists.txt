@@ -269,12 +269,11 @@ set(sail_common
         # D-168 R1: empty mirror deleted. riscv_sys_regs.sail is on the chain above and supplies
         # everything this position needs; the placeholder defined nothing.
         "truisa/truisa_regs.sail"
-        # Shared base file, with the fork's CHERI additions stripped in place
-        # (PCC / nextPCC / set_next_pcc / force_pc). The CHERI chain is no longer a build
-        # target (ADR-0024 decision 11), so editing this file is allowed -- the earlier
-        # TruISA mirror file was deleted with it, or the four accessors would be defined
-        # twice.
-        "riscv_pc_access.sail"
+        # Replaced by truisa/truisa_pc_access.sail (D-417): the four accessors
+        # (get_arch_pc / set_next_pc / tick_pc / force_pc) are re-defined there, and Sail
+        # rejects a second definition, so only one of the two may be linked.
+        # riscv_pc_access.sail stays in the tree, unlinked.
+        "truisa/truisa_pc_access.sail"
         "riscv_vreg_type.sail"
         "riscv_vext_regs.sail"
     )

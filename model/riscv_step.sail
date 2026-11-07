@@ -103,7 +103,8 @@ function run_hart_active(step_no: nat) -> Step = {
         then ext_print_instr(step_no, instruction, h);
         /* check for RVC once here instead of every RVC execute clause. */
         if currentlyEnabled(Ext_Zca) then {
-          nextPC = PC + 2;
+          nextPC  = PC + 2;
+          nextPCC = struct { mode = PCC.mode, nc = PCC.nc, pac = PCC.pac, address = PC + 2 };
           let r = execute(instruction);
           Step_Execute(r, instbits)
         } else {
@@ -115,7 +116,8 @@ function run_hart_active(step_no: nat) -> Step = {
         let instbits : instbits = zero_extend(w);
         let instruction = ext_decode(w);
         ext_print_instr(step_no, instruction, w);
-        nextPC = PC + 4;
+        nextPC  = PC + 4;
+        nextPCC = struct { mode = PCC.mode, nc = PCC.nc, pac = PCC.pac, address = PC + 4 };
         let r = execute(instruction);
         Step_Execute(r, instbits)
       }
