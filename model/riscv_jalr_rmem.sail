@@ -11,7 +11,9 @@
 function clause execute (JALR(imm, rs1, rd)) = {
   /* FIXME: this does not check for a misaligned target address. See riscv_jalr_seq.sail. */
   /* write rd before anything else to prevent unintended strength */
-  X(rd) = nextPC; /* compatible with JALR, C.JR and C.JALR */
+  /* Synced with riscv_jalr_seq.sail for w_link_reg (ADR-0035 decision 11.2 #6-7).
+     ⚠️ This file is NOT in the chain, so this line is UNVERIFIED. */
+  w_link_reg(rd);                 /* compatible with JALR, C.JR and C.JALR */
   let newPC : xlenbits = X(rs1) + sign_extend(imm);
   nextPC = [newPC with 0 = bitzero];  /* Clear newPC[0] */
   RETIRE_SUCCESS

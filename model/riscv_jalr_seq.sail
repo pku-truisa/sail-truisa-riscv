@@ -25,7 +25,7 @@ function clause execute (JALR(imm, rs1, rd)) = {
       if bit_to_bool(target[1]) & not(currentlyEnabled(Ext_Zca)) then {
         Memory_Exception(addr, E_Fetch_Addr_Align())
       } else {
-        X(rd) = get_next_pc();
+        w_link_reg(rd);
         set_next_pc(target);
         RETIRE_SUCCESS
       }

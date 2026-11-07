@@ -44,3 +44,17 @@ function force_pc(pc) = {
   PC = addr;
   nextPC = addr;
 }
+
+// Writes the link register as a full pointer (ADR-0035 decision 11.2 #1). Three things
+// must hold: go through `wX_full` (`wX` would zero the metadata via regval_into_reg),
+// keep `xreg_write_callback` -- it takes the address, not the pointer -- and take the
+// address from `get_next_pc()` while the metadata comes from `PCC`, i.e. the old pc.
+// Lives here because it needs both `PCC` and `get_next_pc`; the callers sit later.
+val w_link_reg : regidx -> unit
+function w_link_reg(Regidx(i) : regidx) = {
+  let addr = get_next_pc();
+  let ptr : Capability = struct { mode = PCC.mode, nc = PCC.nc, pac = PCC.pac,
+                                  address = addr };
+  wX_full(Regno(unsigned(i)), ptr);
+  if unsigned(i) != 0 then xreg_write_callback(Regidx(i), addr);
+}
