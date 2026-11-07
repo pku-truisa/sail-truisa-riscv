@@ -64,6 +64,11 @@ type CapPacBits  = bits(cap_pac_width)
 // is NOT omitted -- it is what fixes the MAC input length.
 type CapSaltBits = bits(cap_salt_width)
 
+// appendix D integer forms. CapLenInt carries one extra bit because `addr + size - 1`
+// must not wrap when the range reaches the top of the address space.
+type CapAddrInt = range(0, 2 ^ xlen - 1)
+type CapLenInt  = range(0, 2 ^ (xlen + 1) - 1)
+
 // 1a-1. Two views, different widths (ADR-0029 decision 1):
 //   memory    mode(1) | N/C(6) | PAC(9) | address(48)   <- CapBits; what SCEQ compares
 //   register  mode+NC(7) | PAC(9) | address(64)        <- this struct
@@ -431,6 +436,38 @@ function getCapBoundsBits(cap : Capability) -> option((bits(cap_ptr_width), bits
     let span : CapAddrBits = truncate(span64, cap_address_width);
     Some((sign_extend(base), sign_extend(base + span)))
   }
+}
+
+// appendix D: the bounds as integers (SCBNDS 的区间判据要用整数比较).
+val  getCapBounds : Capability -> option((CapAddrInt, CapAddrInt))
+function getCapBounds(c : Capability) -> option((CapAddrInt, CapAddrInt)) =
+  match getCapBoundsBits(c) {
+    None()            => None(),
+    Some(base, bound) => Some(unsigned(base), unsigned(bound))
+  }
+
+// appendix D. size = 0 is a caller error -> fail closed, not "empty range is inside".
+val  inCapBoundsNoWrap : (Capability, CapAddrBits, CapLenInt) -> bool
+function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
+  if size == 0 then false
+  else {
+    let a = unsigned(addr);
+    match getCapBounds(cap) {
+      None()            => false,
+      Some(base, bound) => (a >= base) & ((a + size - 1) <= bound),
+    }
+  }
+}
+
+// appendix D. Upper bound splits by form: aligned slot reaches VA (the whole-space slot
+// included), descriptor reaches VA - 1 (D-402).
+val  boundsMalformed : Capability -> bool
+function boundsMalformed(cap : Capability) -> bool = {
+  let va : int = cap_address_width;
+  let nn : int = unsigned(cap.nc);
+  let malformedMSB = if cap.mode == bitone then nn > va else nn > va - 1;
+  let malformedLSB = (cap.mode == bitzero) & (cap.nc == zeros(cap_nc_width));
+  malformedMSB | malformedLSB
 }
 
 // 1c-2a. The three predicates behind BOTH address operators. Each criterion has EXACTLY ONE
