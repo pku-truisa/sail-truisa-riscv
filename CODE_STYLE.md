@@ -250,6 +250,19 @@ point neither model can be checked on its own.
    block is 6 lines. The code was 201 lines and invisible; it is still 201 lines and now
    readable (comment ratio 75% → 45%, CHERI's is 45%).
 
+12. **A symbol carried over from the blueprint writes `truisa` where the blueprint
+   writes `cheri`.** `cheri_registers_enabled` -> `truisa_registers_enabled`. Keep the
+   blueprint's word form: `truisa_` + blueprint spelling means "copied and then
+   changed"; bare `truisa` + camelCase means "invented here" (`truisaMroot`,
+   `truisaMac`).
+
+   A renamed symbol may keep a word the new semantics no longer supports --
+   `registers_enabled` is the live case (no separate register file). Keep the name,
+   state the difference in the comment at the definition, do not rename twice.
+
+   ⛔ Out of scope: paths in comments, `CHERI` as a proper noun, `model/cheri/`.
+   (D-416)
+
 ### Identifier naming (TruISA addition)
 
 - **No bare single letters**, unless the letter is a symbol the specification

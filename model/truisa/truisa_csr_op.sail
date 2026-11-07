@@ -33,8 +33,26 @@
 // hex number instead of the name in traces.
 function clause is_CSR_defined (0xFC0) = true
 
+// From cheri_sys_regs.sail:49, renamed per D-416. Single global bit: no debug escape,
+// no per-privilege chain (D-410). Seccfg has no `CRE` field, so bit 3 is wpri_0[3].
+val truisa_registers_enabled : unit -> bool
+function truisa_registers_enabled() = mseccfg[wpri_0][3] == 0b1
+
 function handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead) =
   if csr == 0xFC0 then {
     C(rd) = truisaMroot();
     RETIRE_SUCCESS
+  } else if csr == 0x747 then {
+    // Latch bit 3 after `default`: doing it first would make read_CSR see the new value
+    // and X(rd) would return the wrong old value.
+    let src : xlenbits = if is_imm then zero_extend(regidx_bits(rs1)) else X(rs1);
+    let tries : bool = isWrite & ((op == CSRRW) | (op == CSRRS)) & src[3] == 0b1;
+    let res = default_handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead);
+    match res {
+      Retire_Success() => {
+        if tries then mseccfg = [mseccfg with wpri_0 = mseccfg[wpri_0] | 0x08];
+        res
+      },
+      _ => res
+    }
   } else default_handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead)

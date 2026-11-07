@@ -29,22 +29,10 @@ type regtype = Capability
 
 /* null cap.
  *
- * ⚠️ Spelled field by field rather than `null_cap`: TruISA has no `null_cap` symbol
- * (it is CHERI's tag=false carrier; TruISA has no tag -- ADR-0001/ADR-0003), and it
- * must not grow one either -- all-zero metadata gives label 0000000, which getCapForm
- * is encoding-unavailable (getCapForm returns None()), so the value here is a
- * BARE POINTER AT ADDRESS ZERO. Same value, but not the same concept as CHERI's
- * first-class "null capability"; borrowing the blueprint's name would hide that
- * (D-115: do not write a count that this very comment would change).
- *
- * `zeros()` rather than 0b000000 for nc: an RV32 target has a 5-bit N/C field
- * (truisa_nc_width), so a literal would not follow the profile (D-96). */
-let zero_reg : regtype = struct {
-  mode    = zeros(),
-  nc      = zeros(),
-  pac     = zeros(),
-  address = zeros(),
-}
+ * All-zero = encoding-unavailable; same value and meaning as `null_cap` (D-410).
+ * Kept as an alias because the base file `riscv_regs.sail:141` spells `zero_reg`
+ * for x0 and base files are not editable (ADR-0024 section 11.4b). */
+let zero_reg : regtype = null_cap
 
 /* register printer.
  *

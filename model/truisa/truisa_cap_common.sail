@@ -76,6 +76,15 @@ struct Capability = {
   address : bits(cap_ptr_width),
 }
 
+// All-zero = encoding-unavailable. Same value and meaning as the blueprint's null_cap
+// (D-410).
+let null_cap : Capability = struct {
+  mode    = zeros(),
+  nc      = zeros(),
+  pac     = zeros(),
+  address = zeros(),
+}
+
 // The poison value WITH A ZERO ADDRESS: mode 0, N/C all ones, PAC 0, address 0
 // An encoding-unavailable value built from an address: bits 63-48 are a copy of that
 // address's bit 47, bits 47-0 are the address itself.
