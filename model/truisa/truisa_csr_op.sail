@@ -50,7 +50,17 @@ function handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead) =
     let res = default_handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead);
     match res {
       Retire_Success() => {
-        if tries then mseccfg = [mseccfg with wpri_0 = mseccfg[wpri_0] | 0x08];
+        if tries then {
+          mseccfg = [mseccfg with wpri_0 = mseccfg[wpri_0] | 0x08];
+          // P1-c: at CRE 0 -> 1, adopt mroot's metadata; the address must not move
+          // (ch06). nextPCC takes the same metadata -- `tick_pc` reloads PCC from it at
+          // the end of this very step, so setting PCC alone would be undone.
+          let root = truisaMroot();
+          PCC    = struct { mode = root.mode, nc = root.nc, pac = root.pac,
+                            address = PCC.address };
+          nextPCC = struct { mode = root.mode, nc = root.nc, pac = root.pac,
+                             address = nextPCC.address };
+        };
         res
       },
       _ => res
