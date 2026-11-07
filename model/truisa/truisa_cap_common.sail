@@ -266,6 +266,16 @@ val  isRootForm : Capability -> bool
 function isRootForm(cap : Capability) -> bool =
   (cap.mode == 0b1) & (unsigned(cap.nc) == cap_address_width)
 
+// getCapSalt -- THE ONLY place a salt is obtained (D-220, D-435). No call site passes a
+// literal; that is what makes "is the descriptor side wired up?" greppable at all.
+//   aligned     -> all-zero BY SPEC, permanently (spec/ch04; ADR-0005 rev 11 item 3).
+//   descriptor  -> the entry's salt; NOT written yet -- phase A produces no such form.
+// `cap` is unused in phase A BY DESIGN (D-223 ruling 5): the salt is a constant here.
+// Phase B computes the entry identifier FROM this argument; do not change the signature
+// to (form, nc) -- that would push form knowledge back to the call sites.
+val  getCapSalt : Capability -> CapSaltBits
+function getCapSalt(cap : Capability) -> CapSaltBits = zeros()
+
 // setCapPAC -- the single signing point (appendix D). The salt is taken INSIDE: on the
 // aligned form it is all-zero by spec (spec/ch04, ADR-0005 rev 11 item 3), and phase A
 // produces no descriptor form, so there is nothing to look up (D-220).
@@ -275,7 +285,7 @@ function setCapPAC(cap : Capability) -> Capability = {
   /* Slices [VA-1..0]: getCapMacInput's first parameter is CapAddrBits (48), not the
    * 64-bit struct field. The redundant high bits are not part of the address. */
   let m   = getCapMacInput(cap.address[cap_address_width - 1 .. 0], cap.nc);
-  let salt : CapSaltBits = zeros();
+  let salt : CapSaltBits = getCapSalt(cap);
   let msg : bits(cap_mac_msg_width) = hi7 @ m @ salt;
   struct {
     mode    = cap.mode,
@@ -442,12 +452,7 @@ function sameSlot(a : CapAddrBits, nc : bits(cap_nc_width), b : CapAddrBits) -> 
 // (3) a carry out of the address field, judged ON THE FIELD. Notes: never judge it as
 // `sign_extend(new48) == sum`, which is identically false whenever bit(VA-1) is set, so it
 // would poison the whole upper half. why: doc/truisa-deltas.md#carry
-val  carryOutOfAddrField : (CapAddrBits, xlenbits) -> bool
-function carryOutOfAddrField(a : CapAddrBits, delta : xlenbits) -> bool = {
-  let sum : bits(cap_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-  (sum[cap_ptr_width] == 0b0)
-  & (sum[cap_ptr_width - 1 .. cap_address_width] != zeros())
-}
+
 
 // Not "setCapAddr plus a sealed check" -- TruISA has no seal (ADR-0001). Two criteria, in
 // spec order: (1) representable = same slot (bare: the same bit(VA-1) half), (2) intact --
@@ -500,20 +505,10 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
 // `sign_extend(new) == sum`, which is identically false for the whole upper half. Downward
 // overflow is ALLOWED (mod 2^VA). why: doc/truisa-deltas.md#incaddr
 val  incCapAddrChecked : (Capability, xlenbits) -> Capability
+// spec/ch04 incCapAddrChecked: ONE line, NO carry check (D-435). A result outside the
+// address field is not rejected here -- the use point reports CAUSE = 3. The model used to
+// pre-poisoned through an extra carry test, which rejected rewrites the spec allows.
 function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
   let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
-  let sum : bits(cap_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-  // Warning: THE FORM GATE IS LOAD-BEARING: `clearTagIf` runs AFTER the delegation, so without
-  // it an input whose encoding is unavailable would be poisoned by the outer call even
-  // though criteria (1)/(2) never ran -- "unavailable" laundered into the failure exit.
-  let carries : bool =
-    (getCapForm(cap) != None()) & carryOutOfAddrField(a, delta);
-  /* Poisoned / invalid inputs come back untouched from setCapAddrChecked's own form
-   * dispatch, and `carries` is false for them, so they are returned exactly as given. */
-  /* Notes: the OUTER poison must pass `cap` too, not the inner result -- the inner call
-   * already returns `addr = new48` on success, so poisoning that value would put the
-   * carried-into-nowhere address into the repair entry point (D-224). Fixing only the
-   * inner one changes nothing here. */
-  clearTagIf(if carries then cap else setCapAddrChecked(cap, truncate(sum, cap_address_width)),
-           carries)
+  setCapAddrChecked(cap, truncate(zero_extend(a) + delta, cap_address_width))
 }
