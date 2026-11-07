@@ -177,7 +177,7 @@ function clause execute (SCBNDSI(cd, cs1, imm)) = {
   // Criteria (1)(2)(4) live in setCapBounds: form + N <= VA (via monotonicity)
   // + slot inside the parent's checked interval.
   let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address[truisa_address_width - 1 .. 0], nbits);
-  C(cd) = poisonIf(newCap, not(hi_ok) | not(inParent));
+  C(cd) = clearTagIf(newCap, not(hi_ok) | not(inParent));
   RETIRE_SUCCESS
 }
 
@@ -205,7 +205,7 @@ function clause execute (SCBNDS(cd, cs1, rs2)) = {
   // Criterion (3): everything above N must be zero -- fail loud.
   let hi_ok : bool = rs2_val[xlen - 1 .. truisa_nc_width] == zeros();
   let (inParent, newCap) = setCapBounds(cs1_val, cs1_val.address[truisa_address_width - 1 .. 0], nbits);
-  C(cd) = poisonIf(newCap, not(hi_ok) | not(inParent));
+  C(cd) = clearTagIf(newCap, not(hi_ok) | not(inParent));
   RETIRE_SUCCESS
 }
 

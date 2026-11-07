@@ -183,7 +183,7 @@ function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
  *   key   (table key, D-66)   N = 0 -> 0 (reserved)        N = 48 -> 2^47
  *
  * They agree at N = 48 and differ ONLY at N = 0. The single caller of the MAC-input form
- * is signPtr; the key form has no caller in phase A (no table yet).
+ * is setCapPAC; the key form has no caller in phase A (no table yet).
  *
  * N = 48 needs no special case: base = getCapSlotBase(p, 48) = 0 and half = 2^47, so the
  * general formula already yields 2^47. D-284 raised this from the old `zeros()`.
@@ -225,12 +225,12 @@ function getCapKey(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
 // Use a NON-zero p when testing the first line: with p = 0 the two formulas coincide and
 // the test proves nothing.
 
-// 1a-8. poisonIf -- the single failure exit of every PTR-producing instruction, and the
+// 1a-8. clearTagIf -- the single failure exit of every PTR-producing instruction, and the
 // ADDRESS IS PRESERVED (ADR-0003 r25): it is the repair entry point, so it must not hold
 // the address that failed to be written. Sail is NOT lazy (D-99 V-5).
 // why: doc/truisa-deltas.md#poisonif
-val  poisonIf : (Capability, bool) -> Capability
-function poisonIf(cap : Capability, cond : bool) -> Capability =
+val  clearTagIf : (Capability, bool) -> Capability
+function clearTagIf(cap : Capability, cond : bool) -> Capability =
   if cond then truisaUnavailable(cap.address) else cap
 
 
@@ -255,7 +255,7 @@ function getCapPac(cap : Capability) -> CapPacBits =
   capToMetadataBits(cap)[cap_pac_width - 1 .. 0]
 
 
-// 1b-5. signPtr -- the single signing operator (spec/ch04 line 233-242), called ONLY at PTR
+// 1b-5. setCapPAC -- the single signing operator (spec/ch04 line 233-242), called ONLY at PTR
 // production points. The m = 0 cases are resolved by D-108 ruling A: for a one-byte slot at
 // address 0 it is reachable and legal, while N = VA returning 0 is an ADR-0026 ruling.
 // why: doc/truisa-deltas.md#signptr
@@ -266,42 +266,34 @@ val  isRootForm : Capability -> bool
 function isRootForm(cap : Capability) -> bool =
   (cap.mode == 0b1) & (unsigned(cap.nc) == cap_address_width)
 
-val  signPtr : (Capability, CapSaltBits) -> Capability
-function signPtr(cap : Capability, salt : CapSaltBits) -> Capability = {
+// setCapPAC -- the single signing point (appendix D). The salt is taken INSIDE: on the
+// aligned form it is all-zero by spec (spec/ch04, ADR-0005 rev 11 item 3), and phase A
+// produces no descriptor form, so there is nothing to look up (D-220).
+val  setCapPAC : Capability -> Capability
+function setCapPAC(cap : Capability) -> Capability = {
   let hi7 = getCapTagBits(cap);
   /* Slices [VA-1..0]: getCapMacInput's first parameter is CapAddrBits (48), not the
    * 64-bit struct field. The redundant high bits are not part of the address. */
   let m   = getCapMacInput(cap.address[cap_address_width - 1 .. 0], cap.nc);
+  let salt : CapSaltBits = zeros();
   let msg : bits(cap_mac_msg_width) = hi7 @ m @ salt;
   struct {
     mode    = cap.mode,
     nc      = cap.nc,
-    pac     = truisaMac(if isRootForm(cap) then truisa_rootkey_stub else truisa_xpkey_stub, msg),
+    pac     = truisaMac(if isRootForm(cap) then truisa_rootkey else truisa_xpkey, msg),
     address = cap.address,
   }
 }
 
-// 1b-6. verifyPtr -- recompute and compare (D-99). Signing is idempotent on the fields that
-// matter, so "compare against signPtr(cap)" is a real test and not a tautology.
-val  verifyPtr : (Capability, CapSaltBits) -> bool
-function verifyPtr(cap : Capability, salt : CapSaltBits) -> bool =
-  getCapPac(cap) == getCapPac(signPtr(cap, salt))
+// 1b-6. capPACValid -- recompute and compare (D-99). Signing is idempotent on the fields that
+// matter, so "compare against setCapPAC(cap)" is a real test and not a tautology.
+val  capPACValid : Capability -> bool
+function capPACValid(cap : Capability) -> bool =
+  getCapPac(cap) == getCapPac(setCapPAC(cap))
 
-// 1b-6b. keySalt -- THE ONLY place a salt is obtained (D-220). No call site passes a
-// literal; that is what makes "is the descriptor side wired up?" greppable at all.
-//   aligned     -> all-zero BY SPEC, permanently (spec/ch04; ADR-0005 rev 11 item 3).
-//   descriptor  -> the entry's salt; NOT written yet -- phase A produces no such form.
-// Do not change CapSaltBits's type or width here (D-220 section 4.3).
-// why: doc/truisa-deltas.md#keysalt
-// Warning: `cap` is unused in phase A BY DESIGN, not by oversight (D-223 ruling 5): the salt is
-// a constant here, so there is nothing to look up. Phase B computes the entry identifier
-// FROM this argument; do not change the signature to (form, nc) -- that would push form
-// knowledge back to the call sites, which is the thing keySalt exists to prevent.
-val  keySalt : Capability -> CapSaltBits
-function keySalt(cap : Capability) -> CapSaltBits = zeros()
 
 // Warning: The body MUST be `if fail then poison else sign`: Sail evaluates arguments before the
-// call, so `poisonIf(signPtr(q, ...), fail)` would compute a MAC and throw it away (D-99 V-5).
+// call, so `clearTagIf(setCapPAC(q), fail)` would compute a MAC and throw it away (D-99 V-5).
 val  makeCapAligned : (Capability, bits(cap_nc_width), bool) -> Capability
 function makeCapAligned(parent : Capability, n : bits(cap_nc_width), fail : bool)
     -> Capability =
@@ -317,7 +309,7 @@ function makeCapAligned(parent : Capability, n : bits(cap_nc_width), fail : bool
        * so the result is sign-extended back into canonical form (ADR-0029 decision 5). */
       address = sign_extend(getCapSlotBase(parent.address[cap_address_width - 1 .. 0], n)),
     };
-    signPtr(q, keySalt(q))
+    setCapPAC(q)
   }
 
 // 1b-8. setCapBounds -- called by SCBNDS/SCBNDSI; the operand is the slot exponent N, not a
@@ -399,7 +391,7 @@ function ncOfN(n : int) -> bits(cap_nc_width) = {
 
 // The root pointer mroot hands out (D-302): an ALIGNED pointer with N = VA and address 0
 // -- the whole-address-space slot, its base being SlotBase(0, VA) = 0. Signed with rootkey
-// because isRootForm(signPtr) keys it that way. salt is zero: the aligned path has no
+// because isRootForm(setCapPAC) keys it that way. salt is zero: the aligned path has no
 // entry and therefore carries no salt (ADR-0005 decision 12).
 // Nothing here reads memory or the table, which is what lets it run before a stack exists.
 val  truisaMroot : unit -> Capability
@@ -411,7 +403,7 @@ function truisaMroot(_ : unit) -> Capability = {
     pac     = zeros(),
     address = zeros(),
   };
-  signPtr(raw, zeros())
+  setCapPAC(raw)
 }
 
 val  getCapBoundsBits : Capability -> option((bits(cap_ptr_width), bits(cap_ptr_width)))
@@ -446,9 +438,6 @@ function getCapBoundsBits(cap : Capability) -> option((bits(cap_ptr_width), bits
 val  sameSlot : (CapAddrBits, bits(cap_nc_width), CapAddrBits) -> bool
 function sameSlot(a : CapAddrBits, nc : bits(cap_nc_width), b : CapAddrBits) -> bool =
   getCapSlotBase(a, nc) == getCapSlotBase(b, nc)
-
-val  ptrIntact : Capability -> bool
-function ptrIntact(cap : Capability) -> bool = verifyPtr(cap, keySalt(cap))
 
 // (3) a carry out of the address field, judged ON THE FIELD. Notes: never judge it as
 // `sign_extend(new48) == sum`, which is identically false whenever bit(VA-1) is set, so it
@@ -500,7 +489,7 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
      * poison address is a REPAIR ENTRY POINT: software re-binds from it (SCBNDS/DSTR), so
      * handing back the address that failed to be written would rebuild the pointer in
      * somebody else's object -- fail-then-repair must not become a privilege escalation. */
-    poisonIf(cap, not(sameSlot(a, cap.nc, addr)) | not(ptrIntact(cap)))
+    clearTagIf(cap, not(sameSlot(a, cap.nc, addr)) | not(capPACValid(cap)))
   }
 }
 
@@ -514,7 +503,7 @@ val  incCapAddrChecked : (Capability, xlenbits) -> Capability
 function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
   let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
   let sum : bits(cap_ptr_width + 1) = zero_extend(a) + sign_extend(delta);
-  // Warning: THE FORM GATE IS LOAD-BEARING: `poisonIf` runs AFTER the delegation, so without
+  // Warning: THE FORM GATE IS LOAD-BEARING: `clearTagIf` runs AFTER the delegation, so without
   // it an input whose encoding is unavailable would be poisoned by the outer call even
   // though criteria (1)/(2) never ran -- "unavailable" laundered into the failure exit.
   let carries : bool =
@@ -525,6 +514,6 @@ function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
    * already returns `addr = new48` on success, so poisoning that value would put the
    * carried-into-nowhere address into the repair entry point (D-224). Fixing only the
    * inner one changes nothing here. */
-  poisonIf(if carries then cap else setCapAddrChecked(cap, truncate(sum, cap_address_width)),
+  clearTagIf(if carries then cap else setCapAddrChecked(cap, truncate(sum, cap_address_width)),
            carries)
 }
