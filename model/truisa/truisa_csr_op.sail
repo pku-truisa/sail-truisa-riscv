@@ -38,6 +38,39 @@ function clause is_CSR_defined (0xFC0) = true
 val truisa_registers_enabled : unit -> bool
 function truisa_registers_enabled() = mseccfg[wpri_0][3] == 0b1
 
+// P2-b: the six pointer-class CSRs (ADR-0011: 0x5C0-0x5C5 contiguous, no holes).
+// ⛔ No csr_name_map entry (D-412 rule 4 repealed that requirement, D-428 section 3).
+// width: xdtp stays 64 (D-404); xpkey0/1 are 64; the three xfail* have no width ruling
+// yet, so they follow xlen. Gated on CRE so that CRE = 0 still reads as "undefined CSR"
+// -- that is D-412 judgement 5, not an optional behaviour.
+register xdtp     : xlenbits
+register xpkey0   : xlenbits
+register xpkey1   : xlenbits
+register xfailcnt : xlenbits
+register xfailctl : xlenbits
+register xfailkey : xlenbits
+
+function clause is_CSR_defined (0x5C0) = truisa_registers_enabled()  // xdtp
+function clause is_CSR_defined (0x5C1) = truisa_registers_enabled()  // xpkey0
+function clause is_CSR_defined (0x5C2) = truisa_registers_enabled()  // xpkey1
+function clause is_CSR_defined (0x5C3) = truisa_registers_enabled()  // xfailcnt
+function clause is_CSR_defined (0x5C4) = truisa_registers_enabled()  // xfailctl
+function clause is_CSR_defined (0x5C5) = truisa_registers_enabled()  // xfailkey
+
+function clause read_CSR (0x5C0) = xdtp
+function clause read_CSR (0x5C1) = xpkey0
+function clause read_CSR (0x5C2) = xpkey1
+function clause read_CSR (0x5C3) = xfailcnt[xlen - 1 .. 0]
+function clause read_CSR (0x5C4) = xfailctl[xlen - 1 .. 0]
+function clause read_CSR (0x5C5) = xfailkey[xlen - 1 .. 0]
+
+function clause write_CSR ((0x5C0, value)) = { xdtp = value; Ok(value) }
+function clause write_CSR ((0x5C1, value)) = { xpkey0 = value; Ok(value) }
+function clause write_CSR ((0x5C2, value)) = { xpkey1 = value; Ok(value) }
+function clause write_CSR ((0x5C3, value)) = { xfailcnt = value; Ok(value) }
+function clause write_CSR ((0x5C4, value)) = { xfailctl = value; Ok(value) }
+function clause write_CSR ((0x5C5, value)) = { xfailkey = value; Ok(value) }
+
 function handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead) =
   if csr == 0xFC0 then {
     C(rd) = truisaMroot();
