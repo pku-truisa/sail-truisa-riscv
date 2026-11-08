@@ -158,9 +158,12 @@ function getCapForm(cap : Capability) -> option(CapPtrForm) = {
 // Warning: Written as a shift PAIR, not `p & ~(2^N - 1)`: the mask form needs a negative-shaped
 // literal in this width, which Sail will not take.
 // why: doc/truisa-deltas.md#slotbase
-val  getCapSlotBase : (CapVABits, bits(truisa_nc_width)) -> CapVABits
-function getCapSlotBase(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits =
-  (p >> unsigned(n)) << unsigned(n)
+// spec appendix D:447 -- `CapAddrBits` in and out; the 48-bit field is taken INSIDE.
+// Slicing first is what keeps `n = VA` at zero (whole-space slot): on a canonical upper-half
+// address `(addr >> 48) << 48` would return the sign-extension instead of 0.
+val  getCapSlotBase : (CapAddrBits, bits(truisa_nc_width)) -> CapAddrBits
+function getCapSlotBase(addr : CapAddrBits, n : bits(truisa_nc_width)) -> CapAddrBits =
+  sign_extend((addr[truisa_address_width - 1 .. 0] >> unsigned(n)) << unsigned(n))
 
 // 1a-7. CentroID canonical point m = S + 2^(N-1) (ADR-0004: the pair is (m-1, m), and m is
 // the canonical one). Returns an ADDRESS, not a key -- the table is keyed by (C, S).
@@ -181,12 +184,12 @@ function getCapSlotBase(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits =
  * N = 48 needs no special case: base = getCapSlotBase(p, 48) = 0 and half = 2^47, so the
  * general formula already yields 2^47. D-284 raised this from the old `zeros()`.
  */
-val  getCapMacInput : (CapVABits, bits(truisa_nc_width)) -> CapVABits
-function getCapMacInput(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits = {
+val  getCapMacInput : (CapAddrBits, bits(truisa_nc_width)) -> CapVABits
+function getCapMacInput(addr : CapAddrBits, n : bits(truisa_nc_width)) -> CapVABits = {
   // Warning: k must be nat, not int. Written as int (unsigned(n) coerced) Sail cannot prove
   // `k >= 0` and rejects the shift with "Could not resolve quantifiers for shiftl".
   let k : nat = unsigned(n);
-  let base : CapVABits = getCapSlotBase(p, n);
+  let base : CapVABits = getCapSlotBase(addr, n)[truisa_address_width - 1 .. 0];
   if k == 0 then base
   else {
     let twop : bits(64) = 0x0000_0000_0000_0001 << k;
@@ -204,9 +207,9 @@ function getCapMacInput(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits =
 // fact (D-297 3.1) -- they are compile-time, so they also fail the build if either formula
 // drifts. p0 is deliberately non-zero: with p = 0 "key is 0" and "m is base = p" would
 // coincide and prove nothing.
-val  getCapKey : (CapVABits, bits(truisa_nc_width)) -> CapVABits
-function getCapKey(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits =
-  if unsigned(n) == 0 then zeros() else getCapMacInput(p, n)
+val  getCapKey : (CapAddrBits, bits(truisa_nc_width)) -> CapVABits
+function getCapKey(addr : CapAddrBits, n : bits(truisa_nc_width)) -> CapVABits =
+  if unsigned(n) == 0 then zeros() else getCapMacInput(addr, n)
 
 // Three properties that pin the split down (D-297 3.1). They are stated here because the
 // model has no top-level assert, and because writing a test for them belongs to the test
@@ -277,7 +280,7 @@ function setCapPAC(cap : Capability) -> Capability = {
   let hi7 = getCapTagBits(cap);
   /* Slices [VA-1..0]: getCapMacInput's first parameter is CapAddrBits (48), not the
    * 64-bit struct field. The redundant high bits are not part of the address. */
-  let m   = getCapMacInput(cap.address[truisa_address_width - 1 .. 0], cap.nc);
+  let m   = getCapMacInput(cap.address, cap.nc);
   let salt : CapSaltBits = getCapSalt(cap);
   let msg : bits(truisa_mac_msg_width) = hi7 @ m @ salt;
   struct {
@@ -322,7 +325,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
    * from the parent's address field exactly as it would be for a usable parent. */
   if getCapForm(parent) == None() then
     (true, unavailableCap(sign_extend(
-             getCapSlotBase(parent.address[truisa_address_width - 1 .. 0], n))))
+             getCapSlotBase(parent.address, n))))
   else {
   // The parent must be an ALIGNED pointer: there is no Bare form any more (D-274/D-276),
   // and a Descriptor parent has no N to nest under.
@@ -330,7 +333,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   /* `base` is CapAddrBits (48) and the struct field is 64: slice the right-hand side so
    * the comparison is between addresses, not between an address and 16 redundant bits
    * (ADR-0029 invariant I2 -- those bits are not part of the value). */
-  let base_ok   = base[truisa_address_width - 1 .. 0] == parent.address[truisa_address_width - 1 .. 0];
+  let base_ok   = base == parent.address;
   if form_ok & n_ok & base_ok then
     // ADR-0034 decision 4: when the child exponent equals the parent's there is nothing to
     // narrow, so copying the parent bit for bit is the right answer -- re-signing would
@@ -342,7 +345,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
       mode    = 0b1,
       nc      = n,
       pac     = zeros(),
-      address = sign_extend(getCapSlotBase(parent.address[truisa_address_width - 1 .. 0], n)),
+      address = getCapSlotBase(parent.address, n),
     }))
   else
     (false, parent)
@@ -393,12 +396,10 @@ function getCapBoundsBits(cap : Capability) -> option((bits(truisa_ptr_width), b
   else {
     /* Aligned: [S, S + 2^N - 1]. S is already N-aligned, so the addition cannot leave
      * the field. N = VA is legal (ADR-0026) and lands on the same all-ones value. */
-    let a : CapVABits = cap.address[truisa_address_width - 1 .. 0];
     let k : nat = unsigned(cap.nc);
-    let base : CapVABits = getCapSlotBase(a, cap.nc);
-    let span64 : bits(64) = ((0x0000_0000_0000_0001 : bits(64)) << k) - 1;
-    let span : CapVABits = truncate(span64, truisa_address_width);
-    Some((sign_extend(base), sign_extend(base + span)))
+    let base : CapAddrBits = getCapSlotBase(cap.address, cap.nc);
+    let span : CapAddrBits = truncate(((0x0000_0000_0000_0001 : bits(64)) << k) - 1, cap_addr_width);
+    Some((base, base + span))
   }
 }
 
@@ -453,10 +454,9 @@ function boundsMalformed(cap : Capability) -> bool = {
 // (D-274/D-276), so the aligned slot rule is the only one left.
 val  sameSlot : (CapAddrBits, bits(truisa_nc_width), CapAddrBits) -> bool
 function sameSlot(a : CapAddrBits, nc : bits(truisa_nc_width), b : CapAddrBits) -> bool =
-  // The slot is a property of the 48-bit ENCODED address; the register view carries 16 bits
-  // of sign extension that are not part of the value (ADR-0029 invariant I2).
-  getCapSlotBase(a[truisa_address_width - 1 .. 0], nc)
-    == getCapSlotBase(b[truisa_address_width - 1 .. 0], nc)
+  // getCapSlotBase slices to the 48-bit encoded field internally (spec appendix D:447), so
+  // this compares two 64-bit register-view addresses directly.
+  getCapSlotBase(a, nc) == getCapSlotBase(b, nc)
 
 // (3) a carry out of the address field, judged ON THE FIELD. Notes: never judge it as
 // `sign_extend(new48) == sum`, which is identically false whenever bit(VA-1) is set, so it
