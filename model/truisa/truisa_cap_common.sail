@@ -446,8 +446,12 @@ function getCapBounds(c : Capability) -> option((CapAddrInt, CapAddrInt)) =
   }
 
 // appendix D. size = 0 is a caller error -> fail closed, not "empty range is inside".
-// ⚠️ `size` is `int`, not the spec's `CapLenInt`: Sail cannot prove 2^k <= 2^(XLEN+1)-1
-// from k <= XLEN, and the value is in range by construction (k = unsigned(6-bit N)).
+// ⚠️ UNRESOLVED DEVIATION (D-436 not implementable): the spec's `CapLenInt` is
+// `range(0, 2^(XLEN+1)-1)`, i.e. a range whose bound is a SYMBOLIC expression. Sail will
+// not discharge `2^k <= 2^(XLEN+1)-1` for any of: `2 ^ k`, `assert` + `2 ^ k`,
+// `if k <= xlen then 2 ^ k else 0`, a `bits(xlen+1)` literal, or `zero_extend` to that
+// width ("Could not resolve quantifiers"). Until the spec picks a representable form,
+// `size` stays `int` -- see the 回函 97 report for the five attempts.
 val  inCapBoundsNoWrap : (Capability, CapAddrBits, int) -> bool
 function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : int) -> bool = {
   if size == 0 then false
