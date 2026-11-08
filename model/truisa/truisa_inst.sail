@@ -141,7 +141,7 @@ union clause instruction = SCADDR : (regidx, regidx, regidx)
  */
 function clause execute (SCADDR(cd, cs1, rs2)) = {
   // rs2 is an XLEN register but an address is VA bits wide.
-  C(cd) = setCapAddrChecked(C(cs1), X(rs2)[truisa_address_width - 1 .. 0]);
+  C(cd) = setCapAddrChecked(C(cs1), X(rs2));
   RETIRE_SUCCESS
 }
 
@@ -172,8 +172,8 @@ function clause execute (SCBNDSI(cd, cs1, imm)) = {
   // spec/insns/scbnds.adoc: the immediate IS the slot exponent N, not a length (ADR-0028).
   let n     : bits(truisa_nc_width) = imm[truisa_nc_width - 1 .. 0];
   let k     = unsigned(n);
-  let base  : CapAddrBits = cs1_val.address[cap_address_width - 1 .. 0];
-  let size  : int         = 2 ^ k;
+  let base  : CapAddrBits = cs1_val.address;
+  let size  : CapLenInt    = capSlotSize(n);
   let inBounds = inCapBoundsNoWrap(cs1_val, base, size);
   let (exact, newCap) = setCapBounds(cs1_val, base, n);
   let cond = boundsMalformed(cs1_val) |
@@ -206,8 +206,8 @@ function clause execute (SCBNDS(cd, cs1, rs2)) = {
   // spec/insns/scbnds.adoc: rs2[5:0] IS the slot exponent N, not a length (ADR-0028).
   let n    : bits(truisa_nc_width) = rs2_val[truisa_nc_width - 1 .. 0];
   let k    = unsigned(n);
-  let base : CapAddrBits = cs1_val.address[cap_address_width - 1 .. 0];
-  let size : int         = 2 ^ k;
+  let base : CapAddrBits = cs1_val.address;
+  let size : CapLenInt    = capSlotSize(n);
   /* Nesting is an INTERVAL test, not an exponent test (D-430): a child slot must fit
    * inside the parent's checked range, which `k >= kp` only approximates. */
   let inBounds = inCapBoundsNoWrap(cs1_val, base, size);

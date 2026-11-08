@@ -32,42 +32,30 @@ let  log2_cap_size = sizeof(log2_cap_size)
 // The widths below are RENAMES, so that everything after this block speaks `cap_*` and the
 // file reads as one unit. ⛔ A `truisa_*` name must not appear below this point (except in
 // the algorithm boundary at 1b-3, which calls into truisa_pac.sail by design).
-type cap_ptr_width      : Int = truisa_ptr_width
-let  cap_ptr_width      = sizeof(cap_ptr_width)
-type cap_mode_width     : Int = truisa_mode_width
-let  cap_mode_width     = sizeof(cap_mode_width)
-type cap_nc_width       : Int = truisa_nc_width
-let  cap_nc_width       = sizeof(cap_nc_width)
-type cap_address_width  : Int = truisa_address_width
-let  cap_address_width  = sizeof(cap_address_width)
-type cap_pac_width      : Int = truisa_pac_width
-let  cap_pac_width      = sizeof(cap_pac_width)
-type cap_tag_width      : Int = truisa_tag_width
-let  cap_tag_width      = sizeof(cap_tag_width)
-type cap_meta_width     : Int = truisa_meta_width
-let  cap_meta_width     = sizeof(cap_meta_width)
-type cap_salt_width     : Int = truisa_salt_width
-let  cap_salt_width     = sizeof(cap_salt_width)
-type cap_mac_msg_width  : Int = truisa_mac_msg_width
-let  cap_mac_msg_width  = sizeof(cap_mac_msg_width)
-
+// spec/appendix D:65-66 -- TWO layers, not one:
+//   CapAddrBits = bits(XLEN)  -> the REGISTER-view address field (Capability.address)
+//   CapVABits   = bits(VA)    -> the ENCODED address (slot arithmetic, MAC input, bitfields)
+// `cap_addr_width` is the former (= xlen); `truisa_address_width` (48) is the latter.
+type cap_addr_width  : Int = xlen
+let  cap_addr_width  = sizeof(cap_addr_width)
 type CapBits     = bits(8 * cap_size)
-type CapAddrBits = bits(cap_address_width)
-type CapTagBits  = bits(cap_tag_width)
+type CapAddrBits = bits(cap_addr_width)
+type CapVABits   = bits(truisa_address_width)
+type CapTagBits  = bits(truisa_tag_width)
 
-type CapMetaBits = bits(cap_meta_width)
+type CapMetaBits = bits(truisa_meta_width)
 
 // VA + PAC_W - 1 .. VA -- never literal bit numbers, the slice moves with the profile.
-type CapPacBits  = bits(cap_pac_width)
+type CapPacBits  = bits(truisa_pac_width)
 
 // Entry salt, or all zeros on the aligned path (ADR-0005 rev 11 c3). Warning: The zero segment
 // is NOT omitted -- it is what fixes the MAC input length.
-type CapSaltBits = bits(cap_salt_width)
+type CapSaltBits = bits(truisa_salt_width)
 
 // appendix D integer forms. CapLenInt carries one extra bit because `addr + size - 1`
 // must not wrap when the range reaches the top of the address space.
 type CapAddrInt = range(0, 2 ^ xlen - 1)
-type CapLenInt  = range(0, 2 ^ (xlen + 1) - 1)
+type CapLenInt  = range(0, 2 ^ 65 - 1)   // spec: 2 ^ (XLEN + 1) - 1, XLEN = 64
 
 // 1a-1. Two views, different widths (ADR-0029 decision 1):
 //   memory    mode(1) | N/C(6) | PAC(9) | address(48)   <- CapBits; what SCEQ compares
@@ -75,10 +63,10 @@ type CapLenInt  = range(0, 2 ^ (xlen + 1) - 1)
 // address[63:48] is redundant (dropped on encode, sign-extended back; I1/I2).
 // why: doc/truisa-deltas.md#layout
 struct Capability = {
-  mode    : bits(cap_mode_width),
-  nc      : bits(cap_nc_width),
-  pac     : bits(cap_pac_width),
-  address : bits(cap_ptr_width),
+  mode    : bits(truisa_mode_width),
+  nc      : bits(truisa_nc_width),
+  pac     : bits(truisa_pac_width),
+  address : bits(truisa_ptr_width),
 }
 
 // All-zero = encoding-unavailable. Same value and meaning as the blueprint's null_cap
@@ -111,9 +99,9 @@ let null_cap : Capability = struct {
 // keep it at zero: ch03's "bits 56-48 take no particular value" is about ARBITRARY
 // unavailable encodings (e.g. a forged word loaded by LC), not about this exit, which is a
 // specially specified one (S-297 section 2).
-val  unavailableCap : bits(cap_ptr_width) -> Capability
-function unavailableCap(addr : bits(cap_ptr_width)) -> Capability =
-  if addr[cap_address_width - 1] == bitzero then
+val  unavailableCap : bits(truisa_ptr_width) -> Capability
+function unavailableCap(addr : bits(truisa_ptr_width)) -> Capability =
+  if addr[truisa_address_width - 1] == bitzero then
     struct { mode = 0b0, nc = zeros(), pac = zeros(), address = addr }
   else
     struct { mode = 0b1, nc = ones(),  pac = ones(),  address = addr }
@@ -126,15 +114,15 @@ function unavailableCap(addr : bits(cap_ptr_width)) -> Capability =
 val  bitsToCap : (bool, CapBits) -> Capability
 function bitsToCap(tag : bool, ptr : CapBits) -> Capability =
   struct {
-    mode    = ptr[cap_ptr_width - 1 .. cap_ptr_width - cap_mode_width],
-    nc      = ptr[cap_ptr_width - cap_mode_width - 1
-                  .. cap_address_width + cap_pac_width],
-    pac     = ptr[cap_address_width + cap_pac_width - 1 .. cap_address_width],
+    mode    = ptr[truisa_ptr_width - 1 .. truisa_ptr_width - truisa_mode_width],
+    nc      = ptr[truisa_ptr_width - truisa_mode_width - 1
+                  .. truisa_address_width + truisa_pac_width],
+    pac     = ptr[truisa_address_width + truisa_pac_width - 1 .. truisa_address_width],
     /* Sign extension, not zero extension: address[63:48] carries no information, so
      * without a rule the same pointer would have 2^16 representations. Copying bit
      * (VA-1) is the only choice that makes encode . decode = id and that matches the
      * RISC-V canonical address form (ADR-0029 decision 5). */
-    address = sign_extend(ptr[cap_address_width - 1 .. 0]),
+    address = sign_extend(ptr[truisa_address_width - 1 .. 0]),
   }
 
 val  capToMetadataBits : Capability -> CapMetaBits
@@ -148,7 +136,7 @@ function capToMetadataBits(cap : Capability) -> CapMetaBits =
  * ---------------------------------------------------------------------------------- */
 val  getCapTagBits : Capability -> CapTagBits
 function getCapTagBits(cap : Capability) -> CapTagBits =
-  capToMetadataBits(cap)[cap_meta_width - 1 .. cap_pac_width]
+  capToMetadataBits(cap)[truisa_meta_width - 1 .. truisa_pac_width]
 
 // 1a-5. Which of the five forms the label denotes (docs/isa/03 section 3.3). The order is
 // Order is not negotiable: both Bare codes first (a descriptor with C = 0 encodes as
@@ -161,17 +149,17 @@ val  getCapForm : Capability -> option(CapPtrForm)
 function getCapForm(cap : Capability) -> option(CapPtrForm) = {
   let n : int = unsigned(cap.nc);
   if cap.mode == 0b1 then
-    (if n <= cap_address_width then Some(FormAligned) else None())
+    (if n <= truisa_address_width then Some(FormAligned) else None())
   else
-    (if n >= 1 & n <= cap_address_width - 1 then Some(FormDescriptor) else None())
+    (if n >= 1 & n <= truisa_address_width - 1 then Some(FormDescriptor) else None())
 }
 
 // 1a-6. Slot base: S = p with the low N bits cleared, i.e. (p >> N) << N.
 // Warning: Written as a shift PAIR, not `p & ~(2^N - 1)`: the mask form needs a negative-shaped
 // literal in this width, which Sail will not take.
 // why: doc/truisa-deltas.md#slotbase
-val  getCapSlotBase : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
-function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
+val  getCapSlotBase : (CapVABits, bits(truisa_nc_width)) -> CapVABits
+function getCapSlotBase(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits =
   (p >> unsigned(n)) << unsigned(n)
 
 // 1a-7. CentroID canonical point m = S + 2^(N-1) (ADR-0004: the pair is (m-1, m), and m is
@@ -193,18 +181,18 @@ function getCapSlotBase(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
  * N = 48 needs no special case: base = getCapSlotBase(p, 48) = 0 and half = 2^47, so the
  * general formula already yields 2^47. D-284 raised this from the old `zeros()`.
  */
-val  getCapMacInput : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
-function getCapMacInput(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits = {
+val  getCapMacInput : (CapVABits, bits(truisa_nc_width)) -> CapVABits
+function getCapMacInput(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits = {
   // Warning: k must be nat, not int. Written as int (unsigned(n) coerced) Sail cannot prove
   // `k >= 0` and rejects the shift with "Could not resolve quantifiers for shiftl".
   let k : nat = unsigned(n);
-  let base : CapAddrBits = getCapSlotBase(p, n);
+  let base : CapVABits = getCapSlotBase(p, n);
   if k == 0 then base
   else {
     let twop : bits(64) = 0x0000_0000_0000_0001 << k;
     // Warning: truncate takes TWO arguments in Sail: the value and the target width
     // (bitvector('n), int('m)). One-argument form fails to resolve.
-    let half : CapAddrBits = truncate(twop >> 1, cap_address_width);
+    let half : CapVABits = truncate(twop >> 1, truisa_address_width);
     base + half
   }
 }
@@ -216,8 +204,8 @@ function getCapMacInput(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits 
 // fact (D-297 3.1) -- they are compile-time, so they also fail the build if either formula
 // drifts. p0 is deliberately non-zero: with p = 0 "key is 0" and "m is base = p" would
 // coincide and prove nothing.
-val  getCapKey : (CapAddrBits, bits(cap_nc_width)) -> CapAddrBits
-function getCapKey(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
+val  getCapKey : (CapVABits, bits(truisa_nc_width)) -> CapVABits
+function getCapKey(p : CapVABits, n : bits(truisa_nc_width)) -> CapVABits =
   if unsigned(n) == 0 then zeros() else getCapMacInput(p, n)
 
 // Three properties that pin the split down (D-297 3.1). They are stated here because the
@@ -245,19 +233,19 @@ function clearTagIf(cap : Capability, cond : bool) -> Capability =
 // PAC_W is, because that is protocol, not algorithm.
 // ----------------------------------------------------------------------------------------
 
-// 1b-3. truisaMac -- the width-aware wrapper the architecture fixes. cap_mac_msg_width
+// 1b-3. truisaMac -- the width-aware wrapper the architecture fixes. truisa_mac_msg_width
 // (tag || CentroID || salt, a FIXED-length concatenation) is defined in prelude_xlen with
 // the other derived widths. The result is truncated to PAC_W here, which is the only place
 // the algorithm's 128-bit output meets the profile's width.
 // why: doc/truisa-deltas.md#mac
-val  truisaMac : (bits(128), bits(cap_mac_msg_width)) -> bits(cap_pac_width)
-function truisaMac(key : bits(128), msg : bits(cap_mac_msg_width)) -> bits(cap_pac_width) =
-  truncate(truisa_mac_raw(key, zero_extend(msg), cap_pac_width), cap_pac_width)
+val  truisaMac : (bits(128), bits(truisa_mac_msg_width)) -> bits(truisa_pac_width)
+function truisaMac(key : bits(128), msg : bits(truisa_mac_msg_width)) -> bits(truisa_pac_width) =
+  truncate(truisa_mac_raw(key, zero_extend(msg), truisa_pac_width), truisa_pac_width)
 
 
 val  getCapPac : Capability -> CapPacBits
 function getCapPac(cap : Capability) -> CapPacBits =
-  capToMetadataBits(cap)[cap_pac_width - 1 .. 0]
+  capToMetadataBits(cap)[truisa_pac_width - 1 .. 0]
 
 
 // 1b-5. setCapPAC -- the single signing operator (spec/ch04 line 233-242), called ONLY at PTR
@@ -269,7 +257,7 @@ function getCapPac(cap : Capability) -> CapPacBits =
 // CRE or privilege -- that is what keeps the bootstrap chain independent of both.
 val  isRootForm : Capability -> bool
 function isRootForm(cap : Capability) -> bool =
-  (cap.mode == 0b1) & (unsigned(cap.nc) == cap_address_width)
+  (cap.mode == 0b1) & (unsigned(cap.nc) == truisa_address_width)
 
 // getCapSalt -- THE ONLY place a salt is obtained (D-220, D-435). No call site passes a
 // literal; that is what makes "is the descriptor side wired up?" greppable at all.
@@ -289,9 +277,9 @@ function setCapPAC(cap : Capability) -> Capability = {
   let hi7 = getCapTagBits(cap);
   /* Slices [VA-1..0]: getCapMacInput's first parameter is CapAddrBits (48), not the
    * 64-bit struct field. The redundant high bits are not part of the address. */
-  let m   = getCapMacInput(cap.address[cap_address_width - 1 .. 0], cap.nc);
+  let m   = getCapMacInput(cap.address[truisa_address_width - 1 .. 0], cap.nc);
   let salt : CapSaltBits = getCapSalt(cap);
-  let msg : bits(cap_mac_msg_width) = hi7 @ m @ salt;
+  let msg : bits(truisa_mac_msg_width) = hi7 @ m @ salt;
   struct {
     mode    = cap.mode,
     nc      = cap.nc,
@@ -317,24 +305,24 @@ function capPACValid(cap : Capability) -> bool =
 //       one-byte slot.
 // Failure returns the parent UNSIGNED and the caller poisons it (truisa_inst.sail:175).
 // why: doc/truisa-deltas.md#setbnds
-val  setCapBounds : (Capability, CapAddrBits, bits(cap_nc_width))
+val  setCapBounds : (Capability, CapAddrBits, bits(truisa_nc_width))
                     -> (bool, Capability)
 function setCapBounds(parent : Capability, base : CapAddrBits,
-                      n : bits(cap_nc_width)) -> (bool, Capability) = {
+                      n : bits(truisa_nc_width)) -> (bool, Capability) = {
   // `base` is the address the child slot must start at. Both current call sites pass
   // cs1_val.address, so it always equals parent.address today; it is kept as a separate
   // parameter because a future instruction may derive base from somewhere else, and
   // CR-MAC-01 Rev.1's signature has no place for it.
   let k         = unsigned(n);
   let kp        = unsigned(parent.nc);
-  let n_ok      = k <= cap_address_width;
+  let n_ok      = k <= truisa_address_width;
   /* Input-illegal exit (spec/ch06, D-318): an unavailable parent does NOT trap and does NOT
    * fall through to the failure exit -- the blueprint narrows the address as usual and only
    * clears the tag. The RESULT address is the slot base of the requested exponent, computed
    * from the parent's address field exactly as it would be for a usable parent. */
   if getCapForm(parent) == None() then
     (true, unavailableCap(sign_extend(
-             getCapSlotBase(parent.address[cap_address_width - 1 .. 0], n))))
+             getCapSlotBase(parent.address[truisa_address_width - 1 .. 0], n))))
   else {
   // The parent must be an ALIGNED pointer: there is no Bare form any more (D-274/D-276),
   // and a Descriptor parent has no N to nest under.
@@ -342,7 +330,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   /* `base` is CapAddrBits (48) and the struct field is 64: slice the right-hand side so
    * the comparison is between addresses, not between an address and 16 redundant bits
    * (ADR-0029 invariant I2 -- those bits are not part of the value). */
-  let base_ok   = base == parent.address[cap_address_width - 1 .. 0];
+  let base_ok   = base[truisa_address_width - 1 .. 0] == parent.address[truisa_address_width - 1 .. 0];
   if form_ok & n_ok & base_ok then
     // ADR-0034 decision 4: when the child exponent equals the parent's there is nothing to
     // narrow, so copying the parent bit for bit is the right answer -- re-signing would
@@ -354,7 +342,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
       mode    = 0b1,
       nc      = n,
       pac     = zeros(),
-      address = sign_extend(getCapSlotBase(parent.address[cap_address_width - 1 .. 0], n)),
+      address = sign_extend(getCapSlotBase(parent.address[truisa_address_width - 1 .. 0], n)),
     }))
   else
     (false, parent)
@@ -387,7 +375,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 // Nothing here reads memory or the table, which is what lets it run before a stack exists.
 val  capMroot : unit -> Capability
 function capMroot(_ : unit) -> Capability = {
-  let n_va : bits(cap_nc_width) = get_slice_int(cap_nc_width, cap_address_width, 0);
+  let n_va : bits(truisa_nc_width) = get_slice_int(truisa_nc_width, truisa_address_width, 0);
   let raw : Capability = struct {
     mode    = 0b1,
     nc      = n_va,
@@ -397,19 +385,19 @@ function capMroot(_ : unit) -> Capability = {
   setCapPAC(raw)
 }
 
-val  getCapBoundsBits : Capability -> option((bits(cap_ptr_width), bits(cap_ptr_width)))
-function getCapBoundsBits(cap : Capability) -> option((bits(cap_ptr_width), bits(cap_ptr_width))) = {
+val  getCapBoundsBits : Capability -> option((bits(truisa_ptr_width), bits(truisa_ptr_width)))
+function getCapBoundsBits(cap : Capability) -> option((bits(truisa_ptr_width), bits(truisa_ptr_width))) = {
   // Only the aligned form has bounds. A descriptor needs the table (phase B); an
   // encoding-unavailable pointer has none by definition.
   if getCapForm(cap) != Some(FormAligned) then None()
   else {
     /* Aligned: [S, S + 2^N - 1]. S is already N-aligned, so the addition cannot leave
      * the field. N = VA is legal (ADR-0026) and lands on the same all-ones value. */
-    let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
+    let a : CapVABits = cap.address[truisa_address_width - 1 .. 0];
     let k : nat = unsigned(cap.nc);
-    let base : CapAddrBits = getCapSlotBase(a, cap.nc);
+    let base : CapVABits = getCapSlotBase(a, cap.nc);
     let span64 : bits(64) = ((0x0000_0000_0000_0001 : bits(64)) << k) - 1;
-    let span : CapAddrBits = truncate(span64, cap_address_width);
+    let span : CapVABits = truncate(span64, truisa_address_width);
     Some((sign_extend(base), sign_extend(base + span)))
   }
 }
@@ -423,14 +411,13 @@ function getCapBounds(c : Capability) -> option((CapAddrInt, CapAddrInt)) =
   }
 
 // appendix D. size = 0 is a caller error -> fail closed, not "empty range is inside".
-// ⚠️ UNRESOLVED DEVIATION (D-436 not implementable): the spec's `CapLenInt` is
-// `range(0, 2^(XLEN+1)-1)`, i.e. a range whose bound is a SYMBOLIC expression. Sail will
-// not discharge `2^k <= 2^(XLEN+1)-1` for any of: `2 ^ k`, `assert` + `2 ^ k`,
-// `if k <= xlen then 2 ^ k else 0`, a `bits(xlen+1)` literal, or `zero_extend` to that
-// width ("Could not resolve quantifiers"). Until the spec picks a representable form,
-// `size` stays `int` -- see the 回函 97 report for the five attempts.
-val  inCapBoundsNoWrap : (Capability, CapAddrBits, int) -> bool
-function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : int) -> bool = {
+// spec appendix D:25. The slot size in bytes. A separate operator so the CapLenInt range
+// obligation is discharged ONCE here, not at every call site.
+val  capSlotSize : bits(truisa_nc_width) -> CapLenInt
+function capSlotSize(n : bits(truisa_nc_width)) -> CapLenInt = 2 ^ unsigned(n)
+
+val  inCapBoundsNoWrap : (Capability, CapAddrBits, CapLenInt) -> bool
+function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
   if size == 0 then false
   else {
     let a = unsigned(addr);
@@ -445,10 +432,10 @@ function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : int) -> 
 // included), descriptor reaches VA - 1 (D-402).
 val  boundsMalformed : Capability -> bool
 function boundsMalformed(cap : Capability) -> bool = {
-  let va : int = cap_address_width;
+  let va : int = truisa_address_width;
   let nn : int = unsigned(cap.nc);
   let malformedMSB = if cap.mode == bitone then nn > va else nn > va - 1;
-  let malformedLSB = (cap.mode == bitzero) & (cap.nc == zeros(cap_nc_width));
+  let malformedLSB = (cap.mode == bitzero) & (cap.nc == zeros(truisa_nc_width));
   malformedMSB | malformedLSB
 }
 
@@ -464,9 +451,12 @@ function boundsMalformed(cap : Capability) -> bool = {
  * 2^(VA-1). */
 // Both predicates used to take a `form` argument to special-case Bare. Bare is gone
 // (D-274/D-276), so the aligned slot rule is the only one left.
-val  sameSlot : (CapAddrBits, bits(cap_nc_width), CapAddrBits) -> bool
-function sameSlot(a : CapAddrBits, nc : bits(cap_nc_width), b : CapAddrBits) -> bool =
-  getCapSlotBase(a, nc) == getCapSlotBase(b, nc)
+val  sameSlot : (CapAddrBits, bits(truisa_nc_width), CapAddrBits) -> bool
+function sameSlot(a : CapAddrBits, nc : bits(truisa_nc_width), b : CapAddrBits) -> bool =
+  // The slot is a property of the 48-bit ENCODED address; the register view carries 16 bits
+  // of sign extension that are not part of the value (ADR-0029 invariant I2).
+  getCapSlotBase(a[truisa_address_width - 1 .. 0], nc)
+    == getCapSlotBase(b[truisa_address_width - 1 .. 0], nc)
 
 // (3) a carry out of the address field, judged ON THE FIELD. Notes: never judge it as
 // `sign_extend(new48) == sum`, which is identically false whenever bit(VA-1) is set, so it
@@ -500,7 +490,7 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
     // exists they are copied as-is -- do NOT leave them here once the table lands.
     cap
   else {
-    let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
+    let a : CapAddrBits = cap.address[cap_addr_width - 1 .. 0];
     let newCap : Capability = struct {
       mode    = cap.mode,
       nc      = cap.nc,
@@ -527,6 +517,6 @@ val  incCapAddrChecked : (Capability, xlenbits) -> Capability
 // address field is not rejected here -- the use point reports CAUSE = 3. The model used to
 // pre-poisoned through an extra carry test, which rejected rewrites the spec allows.
 function incCapAddrChecked(cap : Capability, delta : xlenbits) -> Capability = {
-  let a : CapAddrBits = cap.address[cap_address_width - 1 .. 0];
-  setCapAddrChecked(cap, truncate(zero_extend(a) + delta, cap_address_width))
+  let a : CapAddrBits = cap.address[cap_addr_width - 1 .. 0];
+  setCapAddrChecked(cap, truncate(zero_extend(a) + delta, cap_addr_width))
 }
