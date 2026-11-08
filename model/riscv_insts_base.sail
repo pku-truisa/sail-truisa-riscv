@@ -69,7 +69,7 @@ function clause execute (JAL(imm, rd)) = {
       if bit_to_bool(target_bits[1]) & not(currentlyEnabled(Ext_Zca)) then {
         Memory_Exception(target, E_Fetch_Addr_Align())
       } else {
-        w_link_reg(rd);
+        wLinkReg(rd);
         set_next_pc(target_bits);
         RETIRE_SUCCESS
       }

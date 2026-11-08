@@ -50,8 +50,8 @@ function force_pc(pc) = {
 // keep `xreg_write_callback` -- it takes the address, not the pointer -- and take the
 // address from `get_next_pc()` while the metadata comes from `PCC`, i.e. the old pc.
 // Lives here because it needs both `PCC` and `get_next_pc`; the callers sit later.
-val w_link_reg : regidx -> unit
-function w_link_reg(Regidx(i) : regidx) = {
+val wLinkReg : regidx -> unit
+function wLinkReg(Regidx(i) : regidx) = {
   let addr = get_next_pc();
   let ptr : Capability = struct { mode = PCC.mode, nc = PCC.nc, pac = PCC.pac,
                                   address = addr };

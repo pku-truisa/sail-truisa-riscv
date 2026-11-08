@@ -73,7 +73,7 @@ function clause write_CSR ((0x5C5, value)) = { xfailkey = value; Ok(value) }
 
 function handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead) =
   if csr == 0xFC0 then {
-    C(rd) = truisaMroot();
+    C(rd) = capMroot();
     RETIRE_SUCCESS
   } else if csr == 0x747 then {
     // Latch bit 3 after `default`: doing it first would make read_CSR see the new value
@@ -88,7 +88,7 @@ function handle_csr_op(csr, rs1, rd, is_imm, op, isWrite, isRead) =
           // P1-c: at CRE 0 -> 1, adopt mroot's metadata; the address must not move
           // (ch06). nextPCC takes the same metadata -- `tick_pc` reloads PCC from it at
           // the end of this very step, so setting PCC alone would be undone.
-          let root = truisaMroot();
+          let root = capMroot();
           PCC    = struct { mode = root.mode, nc = root.nc, pac = root.pac,
                             address = PCC.address };
           nextPCC = struct { mode = root.mode, nc = root.nc, pac = root.pac,

@@ -4,7 +4,7 @@
 /*  Counterpart: model/cheri/cheri_cap_common.sail (700 lines).                          */
 /*                                                                                       */
 /*  Status: 1a DONE, 1b DONE (CR-MAC-01 Rev.1). Widths, the Capability struct, the eight  */
-/*  read-only operators, then the MAC stub, sign/verify, makeCapAligned and setCapBounds. */
+/*  read-only operators, then the MAC algorithm, sign/verify, and setCapBounds. */
 /*  SCBNDS/SCBNDSI therefore sign now. capToMetadataBits and the bounds decode stay out:  */
 /*  TruISA has no metadata and no in-pointer bounds.                                       */
 /*=======================================================================================*/
@@ -111,8 +111,8 @@ let null_cap : Capability = struct {
 // keep it at zero: ch03's "bits 56-48 take no particular value" is about ARBITRARY
 // unavailable encodings (e.g. a forged word loaded by LC), not about this exit, which is a
 // specially specified one (S-297 section 2).
-val  truisaUnavailable : bits(cap_ptr_width) -> Capability
-function truisaUnavailable(addr : bits(cap_ptr_width)) -> Capability =
+val  unavailableCap : bits(cap_ptr_width) -> Capability
+function unavailableCap(addr : bits(cap_ptr_width)) -> Capability =
   if addr[cap_address_width - 1] == bitzero then
     struct { mode = 0b0, nc = zeros(), pac = zeros(), address = addr }
   else
@@ -236,7 +236,7 @@ function getCapKey(p : CapAddrBits, n : bits(cap_nc_width)) -> CapAddrBits =
 // why: doc/truisa-deltas.md#poisonif
 val  clearTagIf : (Capability, bool) -> Capability
 function clearTagIf(cap : Capability, cond : bool) -> Capability =
-  if cond then truisaUnavailable(cap.address) else cap
+  if cond then unavailableCap(cap.address) else cap
 
 
 // ---- PAC algorithm boundary ------------------------------------------------------------
@@ -307,26 +307,6 @@ function capPACValid(cap : Capability) -> bool =
   getCapPac(cap) == getCapPac(setCapPAC(cap))
 
 
-// Warning: The body MUST be `if fail then poison else sign`: Sail evaluates arguments before the
-// call, so `clearTagIf(setCapPAC(q), fail)` would compute a MAC and throw it away (D-99 V-5).
-val  makeCapAligned : (Capability, bits(cap_nc_width), bool) -> Capability
-function makeCapAligned(parent : Capability, n : bits(cap_nc_width), fail : bool)
-    -> Capability =
-  // Notes: `parent.address`, not the slot base and not 0 (D-224) -- the slot base is a
-  // derived position that can fall outside `parent` as n grows, and 0 carries no information.
-  if fail then truisaUnavailable(parent.address)
-  else {
-    let q : Capability = struct {
-      mode    = 0b1,
-      nc      = n,
-      pac     = zeros(),
-      /* getCapSlotBase takes and returns CapAddrBits (48); the struct field is 64 bits,
-       * so the result is sign-extended back into canonical form (ADR-0029 decision 5). */
-      address = sign_extend(getCapSlotBase(parent.address[cap_address_width - 1 .. 0], n)),
-    };
-    setCapPAC(q)
-  }
-
 // 1b-8. setCapBounds -- called by SCBNDS/SCBNDSI; the operand is the slot exponent N, not a
 // length (ADR-0028). Four criteria, in the instruction pages' order:
 //   (1) form: Aligned or Bare (Descriptor fails until the table exists).
@@ -344,7 +324,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   // `base` is the address the child slot must start at. Both current call sites pass
   // cs1_val.address, so it always equals parent.address today; it is kept as a separate
   // parameter because a future instruction may derive base from somewhere else, and
-  // makeCapAligned's signature (fixed by CR-MAC-01 Rev.1) has no place for it.
+  // CR-MAC-01 Rev.1's signature has no place for it.
   let k         = unsigned(n);
   let kp        = unsigned(parent.nc);
   let n_ok      = k <= cap_address_width;
@@ -353,7 +333,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
    * clears the tag. The RESULT address is the slot base of the requested exponent, computed
    * from the parent's address field exactly as it would be for a usable parent. */
   if getCapForm(parent) == None() then
-    (true, truisaUnavailable(sign_extend(
+    (true, unavailableCap(sign_extend(
              getCapSlotBase(parent.address[cap_address_width - 1 .. 0], n))))
   else {
   // The parent must be an ALIGNED pointer: there is no Bare form any more (D-274/D-276),
@@ -370,7 +350,12 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
     // would therefore always mismatch. In the bootstrap chain this is NOT hit: scbnds
     // there narrows, so it takes the re-signing branch.
     if k == kp then (true, parent)
-    else (true, makeCapAligned(parent, n, false))
+    else (true, setCapPAC(struct {
+      mode    = 0b1,
+      nc      = n,
+      pac     = zeros(),
+      address = sign_extend(getCapSlotBase(parent.address[cap_address_width - 1 .. 0], n)),
+    }))
   else
     (false, parent)
   }
@@ -395,22 +380,14 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
 // The N/C field encoding of an exponent (D-305 section 5). One definition so that every
 // producer of an Aligned pointer converts the same way -- if the field width ever changes,
 // this is the only line to touch.
-// Warning: `n` must be a legal exponent. The bound is asserted rather than clamped,
-// because a clamp would turn a spec violation into a silently wrong slot.
-val  ncOfN : int -> bits(cap_nc_width)
-function ncOfN(n : int) -> bits(cap_nc_width) = {
-  assert(n >= 0 & n <= cap_address_width);
-  get_slice_int(cap_nc_width, n, 0)
-}
-
 // The root pointer mroot hands out (D-302): an ALIGNED pointer with N = VA and address 0
 // -- the whole-address-space slot, its base being SlotBase(0, VA) = 0. Signed with rootkey
 // because isRootForm(setCapPAC) keys it that way. salt is zero: the aligned path has no
 // entry and therefore carries no salt (ADR-0005 decision 12).
 // Nothing here reads memory or the table, which is what lets it run before a stack exists.
-val  truisaMroot : unit -> Capability
-function truisaMroot(_ : unit) -> Capability = {
-  let n_va : bits(cap_nc_width) = ncOfN(cap_address_width);
+val  capMroot : unit -> Capability
+function capMroot(_ : unit) -> Capability = {
+  let n_va : bits(cap_nc_width) = get_slice_int(cap_nc_width, cap_address_width, 0);
   let raw : Capability = struct {
     mode    = 0b1,
     nc      = n_va,
@@ -517,7 +494,7 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
      * the tag, and this architecture has no out-of-band tag, so the invalidity goes into
      * bits 63-48. The address here is the RESULT (the new address we were asked to set),
      * not the parent's: SCADDR computes it either way. */
-    truisaUnavailable(sign_extend(addr))
+    unavailableCap(sign_extend(addr))
   else if getCapForm(cap) == Some(FormDescriptor) then
     // TODO(phase B): descriptors need their entry for criterion (2). Until the table
     // exists they are copied as-is -- do NOT leave them here once the table lands.
