@@ -27,6 +27,11 @@ union ExecutionResult = {
   Ext_ControlAddr_Check_Failure  : ext_control_addr_error,
   Ext_DataAddr_Check_Failure     : ext_data_addr_error,
   Ext_XRET_Priv_Failure          : unit,
+
+  // TRUISA DELTA (D-454): the capability-exception return path. This is the SINGLE member
+  // this architecture adds to the base type (ADR-0035 whitelist, entry 15); the payload is
+  // what `mtval2` is built from -- TYPE from CapCheckType, CAUSE from CapEx.
+  TRUISA_Exception               : (CapCheckType, CapEx, virtaddr),
 }
 
 // To ease the introduction of `ExecutionResult`, this global
