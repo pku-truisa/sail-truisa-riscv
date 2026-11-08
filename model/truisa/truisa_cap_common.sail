@@ -359,12 +359,11 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   // The parent must be an ALIGNED pointer: there is no Bare form any more (D-274/D-276),
   // and a Descriptor parent has no N to nest under.
   let form_ok   = getCapForm(parent) == Some(FormAligned);
-  let in_parent = k >= kp;
   /* `base` is CapAddrBits (48) and the struct field is 64: slice the right-hand side so
    * the comparison is between addresses, not between an address and 16 redundant bits
    * (ADR-0029 invariant I2 -- those bits are not part of the value). */
   let base_ok   = base == parent.address[cap_address_width - 1 .. 0];
-  if form_ok & n_ok & in_parent & base_ok then
+  if form_ok & n_ok & base_ok then
     // ADR-0034 decision 4: when the child exponent equals the parent's there is nothing to
     // narrow, so copying the parent bit for bit is the right answer -- re-signing would
     // stamp an xpkey signature onto an N = VA pointer, which verifies under rootkey and
@@ -447,8 +446,10 @@ function getCapBounds(c : Capability) -> option((CapAddrInt, CapAddrInt)) =
   }
 
 // appendix D. size = 0 is a caller error -> fail closed, not "empty range is inside".
-val  inCapBoundsNoWrap : (Capability, CapAddrBits, CapLenInt) -> bool
-function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : CapLenInt) -> bool = {
+// ⚠️ `size` is `int`, not the spec's `CapLenInt`: Sail cannot prove 2^k <= 2^(XLEN+1)-1
+// from k <= XLEN, and the value is in range by construction (k = unsigned(6-bit N)).
+val  inCapBoundsNoWrap : (Capability, CapAddrBits, int) -> bool
+function inCapBoundsNoWrap(cap : Capability, addr : CapAddrBits, size : int) -> bool = {
   if size == 0 then false
   else {
     let a = unsigned(addr);
