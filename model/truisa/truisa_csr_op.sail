@@ -35,6 +35,12 @@ function clause is_CSR_defined (0xFC0) = true
 
 // From cheri_sys_regs.sail:49, renamed per D-416. Single global bit: no debug escape,
 // no per-privilege chain (D-410). Seccfg has no `CRE` field, so bit 3 is wpri_0[3].
+// spec appendix D:48 / ch07:10 -- mtval2, CSR 0x34b (the STANDARD number; it belongs to the
+// H extension, which this architecture does not implement). CRE = 0 must leave it undefined,
+// exactly like a standard RISC-V without H -- that is what keeps D-412 criterion 9 intact.
+register mtval2 : Tval2
+mapping clause csr_name_map = 0x34B <-> "mtval2"
+
 val truisa_registers_enabled : unit -> bool
 function truisa_registers_enabled() = mseccfg[wpri_0][3] == 0b1
 
@@ -50,6 +56,18 @@ register xfailcnt : xlenbits
 register xfailctl : xlenbits
 register xfailkey : xlenbits
 
+function clause is_CSR_defined (0x34B) = truisa_registers_enabled()  // mtval2 (H-ext number)
+// spec appendix D:531 -- STRICTER than the blueprint, which keeps the old wpri bits via
+// `[old with TYPE = v[TYPE], CAUSE = v[CAUSE]]`. ch07:42 requires bits 15-4 to be always 0,
+// so they are cleared explicitly. Result: mtval2 is a PURE FUNCTION of (TYPE, CAUSE).
+val legalize_tval2 : (Tval2, xlenbits) -> Tval2
+function legalize_tval2(_old : Tval2, value : xlenbits) -> Tval2 = {
+  let v = Mk_Tval2(value);
+  Mk_Tval2((zero_extend(v[TYPE]) << 16) | zero_extend(v[CAUSE]))
+}
+
+function clause read_CSR(0x34B) = mtval2.bits
+function clause write_CSR(0x34B, value) = { mtval2 = legalize_tval2(mtval2, value); Ok(mtval2.bits) }
 function clause is_CSR_defined (0x5C0) = truisa_registers_enabled()  // xdtp
 function clause is_CSR_defined (0x5C1) = truisa_registers_enabled()  // xpkey0
 function clause is_CSR_defined (0x5C2) = truisa_registers_enabled()  // xpkey1

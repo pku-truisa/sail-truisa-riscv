@@ -100,6 +100,15 @@ enum CapCheckType = {
   CapCheckType_JBr,
 }
 
+/* spec appendix D:127 -- the second trap value. The bitfield is what makes `mtval2` a
+ * PURE FUNCTION of (TYPE, CAUSE): wpri_0 (bits 15-4) is always 0, wpri_1 (31-20) reserved. */
+bitfield Tval2 : xlenbits = {
+  wpri_1 : xlen - 1 .. 20,
+  TYPE   : 19 .. 16,
+  wpri_0 : 15 .. 4,
+  CAUSE  : 3 .. 0,
+}
+
 /* function for symmetry with capex_code above: one shape for both views of both enums,
  * rather than a mapping here and a function there for the same kind of lookup. */
 val capchecktype_code : CapCheckType -> bits(4)
