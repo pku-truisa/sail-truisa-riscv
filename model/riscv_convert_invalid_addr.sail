@@ -10,7 +10,14 @@ overload convertInvalidAddr = {convertInvalidAddrBits}
 // Test if an address is valid. convertInvalidAddrBits must do nothing if
 // validAddr returns true, but it is allowed that some invalid addresses
 // are not changed by the conversion.
-function validAddr(addr : xlenbits) -> bool = true
+//
+// TRUISA DELTA (D-443): both predicates are now MECHANISM here, semantics live in
+// model/truisa/truisa_addr_checks.sail (which is later in the chain, so its `overload`
+// wins). The stubs stay `true` so that a build without the TruISA override behaves
+// exactly as the fork point did.
+function validAddr_stub(addr : xlenbits) -> bool = true
+overload validAddr = {validAddr_stub}
 
 // Test if every address in a range of addresses is valid.
-function validAddrRange(addr : xlenbits, width: range(0, max_mem_access)) -> bool = true
+function validAddrRange_stub(addr : xlenbits, width: range(0, max_mem_access)) -> bool = true
+overload validAddrRange = {validAddrRange_stub}

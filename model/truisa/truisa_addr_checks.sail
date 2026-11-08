@@ -10,7 +10,7 @@
  *  this file is judged by:
  *
  *      grep -cE '^function ' model/truisa/truisa_addr_checks.sail   ==  rows in the D-7 table
- *                                                                      (2 == 2 as of D-7)
+ *                                                                      (4 == 4 as of D-443)
  *
  *  (`val` lines are the declarations that pair with those two functions, not extra hooks.)
  *
@@ -98,6 +98,15 @@
  *
  *  ⛔ Stub state, not compliance: this records that TruISA adds no CSR-level access control
  *  beyond base check_CSR. It is NOT a statement that ADR-0017 is implemented.
+ *
+ *  --- D-443 (P2-e): the two address-normalcy predicates, moved here from the base stubs ---
+ *
+ *  validAddr      -> the Sv48 canonical requirement: bits 63-47 must all equal bit 47.
+ *                    spec appendix D gives it over CapAddrBits; this file uses the base
+ *                    type xlenbits, which is the same bits(XLEN) -- see 回函 107 §3.2.
+ *  validAddrRange -> every byte of [addr, addr + width - 1] is valid. Written as an `if`,
+ *                    NOT as `width == 0 | (...)`: Sail's `|` is not lazy (D-99) and
+ *                    `width - 1` underflows when width = 0.
  *=======================================================================================*/
 
 val ext_check_CSR : (csreg, Privilege, bool, csrop) -> option(ext_csr_exc_type)
@@ -105,3 +114,21 @@ function ext_check_CSR (csrno, p, isWrite, op) = None()
 
 val ext_check_CSR_fail : (ext_csr_exc_type) -> unit
 function ext_check_CSR_fail (fail_type) = ()
+
+// spec appendix D:130 -- `validAddr`. The spec types it CapAddrBits; overloading an
+// xlenbits function is what the base expects, and bits(XLEN) is the same type (回函 107 §3.2).
+val truisa_validAddr : xlenbits -> bool
+function truisa_validAddr(addr : xlenbits) -> bool =
+  (addr[xlen - 1 .. truisa_address_width - 1] == zeros())
+  | (addr[xlen - 1 .. truisa_address_width - 1] == ones())
+
+// spec appendix D:135 -- `validAddrRange`. `width` is bounded by max_mem_access (4096),
+// far below 2^47, so the range cannot straddle the two halves: checking both endpoints
+// is enough. `if` rather than `|` because `|` is not lazy and width - 1 underflows at 0.
+val truisa_validAddrRange : (xlenbits, range(0, max_mem_access)) -> bool
+function truisa_validAddrRange(addr : xlenbits, width : range(0, max_mem_access)) -> bool =
+  if width == 0 then true
+  else truisa_validAddr(addr) & truisa_validAddr(addr + get_slice_int(xlen, width - 1, 0))
+
+overload validAddr = {truisa_validAddr}
+overload validAddrRange = {truisa_validAddrRange}
