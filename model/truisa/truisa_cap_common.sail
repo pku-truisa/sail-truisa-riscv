@@ -509,11 +509,10 @@ function setCapAddrChecked(cap : Capability, addr : CapAddrBits) -> Capability =
     };
     /* Criteria (1) then (2), in the spec's order, so a future xtval can say which failed
      * first. One call each -- the definitions are in 1c-2a, not here.
-     * Notes: the poisoned result carries the CALLER's address, not `addr` (D-224). The
-     * poison address is a REPAIR ENTRY POINT: software re-binds from it (SCBNDS/DSTR), so
-     * handing back the address that failed to be written would rebuild the pointer in
-     * somebody else's object -- fail-then-repair must not become a privilege escalation. */
-    clearTagIf(cap, not(sameSlot(a, cap.nc, addr)) | not(capPACValid(cap)))
+     * Notes: the failed exit carries the RESULT address, i.e. the one we were asked to
+     * write -- the blueprint passes `newCap` to `clearTagIf` (cheri_cap_common.sail:621).
+     * The old D-224 wording ("carries the CALLER's address") was repealed by D-439. */
+    clearTagIf(newCap, not(sameSlot(a, cap.nc, addr)) | not(capPACValid(cap)))
   }
 }
 
