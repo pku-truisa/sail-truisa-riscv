@@ -221,10 +221,13 @@ function getCapKey(addr : CapAddrBits, n : bits(truisa_nc_width)) -> CapVABits =
 // Use a NON-zero p when testing the first line: with p = 0 the two formulas coincide and
 // the test proves nothing.
 
-// 1a-8. clearTagIf -- the single failure exit of every PTR-producing instruction, and the
-// ADDRESS IS PRESERVED (ADR-0003 r25): it is the repair entry point, so it must not hold
-// the address that failed to be written. Sail is NOT lazy (D-99 V-5).
-// why: doc/truisa-deltas.md#poisonif
+// 1a-8. clearTagIf -- the single failure exit of every PTR-producing instruction.
+// It rewrites bits 63-48 from the address's OWN bit 47 and leaves bits 47-0 intact.
+// NOTE (D-439): callers pass the POST-assembly value (newCap), never the parent --
+// the blueprint does the same (cheri_cap_common.sail:621). The exit therefore carries
+// the RESULT address, i.e. the address the instruction was trying to write.
+// D-224's "must not hold the address that failed to be written" is WITHDRAWN.
+// Sail is NOT lazy (D-99 V-5). why: doc/truisa-deltas.md#poisonif
 val  clearTagIf : (Capability, bool) -> Capability
 function clearTagIf(cap : Capability, cond : bool) -> Capability =
   if cond then unavailableCap(cap.address) else cap
@@ -318,7 +321,7 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   // CR-MAC-01 Rev.1's signature has no place for it.
   let k         = unsigned(n);
   let kp        = unsigned(parent.nc);
-  let n_ok      = k <= truisa_address_width;
+  let isExponentValid = k <= truisa_address_width;
   /* Input-illegal exit (spec/ch06, D-318): an unavailable parent does NOT trap and does NOT
    * fall through to the failure exit -- the blueprint narrows the address as usual and only
    * clears the tag. The RESULT address is the slot base of the requested exponent, computed
@@ -329,12 +332,12 @@ function setCapBounds(parent : Capability, base : CapAddrBits,
   else {
   // The parent must be an ALIGNED pointer: there is no Bare form any more (D-274/D-276),
   // and a Descriptor parent has no N to nest under.
-  let form_ok   = getCapForm(parent) == Some(FormAligned);
+  let isFormValid     = getCapForm(parent) == Some(FormAligned);
   /* `base` is CapAddrBits (48) and the struct field is 64: slice the right-hand side so
    * the comparison is between addresses, not between an address and 16 redundant bits
    * (ADR-0029 invariant I2 -- those bits are not part of the value). */
-  let base_ok   = base == parent.address;
-  if form_ok & n_ok & base_ok then
+  let isBaseValid     = base == parent.address;
+  if isFormValid & isExponentValid & isBaseValid then
     // ADR-0034 decision 4: when the child exponent equals the parent's there is nothing to
     // narrow, so copying the parent bit for bit is the right answer -- re-signing would
     // stamp an xpkey signature onto an N = VA pointer, which verifies under rootkey and
