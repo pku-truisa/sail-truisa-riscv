@@ -207,16 +207,16 @@ function getCapMacInput(addr : CapAddrBits, n : bits(truisa_nc_width)) -> CapVAB
 // fact (D-297 3.1) -- they are compile-time, so they also fail the build if either formula
 // drifts. p0 is deliberately non-zero: with p = 0 "key is 0" and "m is base = p" would
 // coincide and prove nothing.
-val  getCapKey : (CapAddrBits, bits(truisa_nc_width)) -> CapVABits
-function getCapKey(addr : CapAddrBits, n : bits(truisa_nc_width)) -> CapVABits =
+val  getCapCentroID : (CapAddrBits, bits(truisa_nc_width)) -> CapVABits
+function getCapCentroID(addr : CapAddrBits, n : bits(truisa_nc_width)) -> CapVABits =
   if unsigned(n) == 0 then zeros() else getCapMacInput(addr, n)
 
 // Three properties that pin the split down (D-297 3.1). They are stated here because the
 // model has no top-level assert, and because writing a test for them belongs to the test
 // group (who own the expectations, not us):
 //
-//   N = 0   getCapKey(p, 0)      == 0        and   getCapMacInput(p, 0) == p      (DIFFER)
-//   N = 48  getCapKey(p, 48)     == 2^47     and   getCapMacInput(p, 48) == 2^47  (SAME)
+//   N = 0   getCapCentroID(p, 0)      == 0        and   getCapMacInput(p, 0) == p      (DIFFER)
+//   N = 48  getCapCentroID(p, 48)     == 2^47     and   getCapMacInput(p, 48) == 2^47  (SAME)
 //
 // Use a NON-zero p when testing the first line: with p = 0 the two formulas coincide and
 // the test proves nothing.
